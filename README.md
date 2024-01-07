@@ -1,17 +1,8 @@
 
-In the past we had Object.observe() and Array.observe()
-Now we use Proxy
+In the past we had Object.observe() and Array.observe().
+Now we use Proxy and this library uses it.
 
-KnockoutJS
-ko.computed: changes when an ko.observable changes
-ko.subscribe: triggered when an ko.observable changes
-
-Also see:
-https://github.com/jhiver/template-tal
-https://github.com/alpinejs/alpine
-https://unpkg.com/alpinejs@3.2.2/dist/cdn.js
-https://github.com/vuejs/vue-next/tree/master/packages/reactivity/src
-
+This JavaScript code is like the [Template Attribute Language](https://en.wikipedia.org/wiki/Template_Attribute_Language) of Zope/Python
 
 Issue with path:
   For example we have an expression as `path:item/name`
