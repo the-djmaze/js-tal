@@ -1,4 +1,15 @@
-import { isObject, IS_PROXY, Observers, TalError } from 'common';
+import { isObject, IS_PROXY, Observers, isFunction, TalError } from 'common';
+
+let detectingObservables;
+export const
+	detectObservables = () => {
+		detectingObservables || (detectingObservables = []);
+	},
+	getDetectedObservables = () => {
+		let result = detectingObservables;
+		detectingObservables = null;
+		return result;
+	};
 
 const proxyMap = new WeakMap();
 export function observeObject(obj, parent/*, deep*/)
@@ -53,13 +64,22 @@ export function observeObject(obj, parent/*, deep*/)
 						return () => observers.dispatchAll(obj);
 					// Vue computed(), Knockout computed()
 					case "defineComputed":
-						return (name, fn, observe) => {
+						return (name, fn) => {
+							detectObservables();
+							fn();
+							getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
 							Object.defineProperty(obj, name, { get: fn });
-							observe && observe.forEach(n => observers.observe(n, () => observers.dispatch(name, fn())));
 						};
 				}
 				if (Reflect.has(target, prop)) {
-					return Reflect.get(target, prop, receiver);
+					if (detectingObservables) {
+						detectingObservables.push([proxy, prop]);
+					}
+					let result = Reflect.get(target, prop, receiver);
+					if (isFunction(result)) {
+						result = result.bind(proxy);
+					}
+					return result;
 				}
 				if (typeof prop !== 'symbol') {
 					if (parent) {
@@ -70,6 +90,9 @@ export function observeObject(obj, parent/*, deep*/)
 				}
 			},
 			set(target, prop, value, receiver) {
+				if (detectingObservables) {
+					return true;
+				}
 				switch (prop)
 				{
 					case "observe":
@@ -126,9 +149,11 @@ export function observeArrayObject(obj, parent/*, deep*/)
 					return () => observers.dispatchAll(obj);
 				// Vue computed(), Knockout computed()
 				case "defineComputed":
-					return (name, fn, observe) => {
+					return (name, fn) => {
+						detectObservables();
+						fn();
+						getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
 						Object.defineProperty(obj, name, { get: fn });
-						observe && observe.forEach(n => observers.observe(n, () => observers.dispatch(name, fn())));
 					};
 				}
 				if (Reflect.has(target, prop)) {
@@ -166,7 +191,14 @@ export function observeArrayObject(obj, parent/*, deep*/)
 							return result;
 						};
 					}
-					return Reflect.get(target, prop, receiver);
+					if (detectingObservables) {
+						detectingObservables.push([proxy, prop]);
+					}
+					let result = Reflect.get(target, prop, receiver);
+					if (isFunction(result)) {
+						result = result.bind(proxy);
+					}
+					return result;
 //					let value = Reflect.get(target, prop, receiver);
 //					return isFunction(value) ? value.bind(target) : value;
 				}
@@ -179,6 +211,9 @@ export function observeArrayObject(obj, parent/*, deep*/)
 				}
 			},
 			set(target, prop, value) {
+				if (detectingObservables) {
+					return true;
+				}
 				if (target[prop] !== value) {
 					target[prop] = value;
 					if ("length" === prop) {

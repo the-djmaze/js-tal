@@ -48,9 +48,9 @@
 		<button tal:listen="click toggleName">value = time</button>
 		<button tal:listen="click toggleListItem">list[0] = name</button>
 		<br/>
-		<var tal:content="nameIs"></var>
-		<br/>
 		<var tal:content="name"></var>
+		<br/>
+		<var tal:content="nameIs"></var>
 
 		<hr/>
 		<input tal:attributes="value nameLive; type 'text'" tal:listen="input nameLive"/>
@@ -124,10 +124,13 @@ const context = TAL.observeObject({
 	popList2Item:     () => context.list2.pop(),
 	spliceList2Item:  () => context.list2.splice(1,1,{id:Date.now(), name:'spliced '+Date.now()}),
 	setHTML:          () => context.html = '<div>'+Date.now()+'</div>',
-	setSubtree:       () => context.subtree.foo = 'subtree.foo = ' + Date.now()
+	setSubtree: function() {
+		console.dir({setSubtreeScope:this});
+		context.subtree.foo = 'subtree.foo = ' + Date.now()
+	}
 });
-context.defineComputed('nameIs', ()=>'name = '+context.name, ['name']);
-context.defineComputed('nameLiveIs', ()=>'name = '+context.nameLive, ['nameLive']);
+context.defineComputed('nameIs', ()=>'name = '+context.name);
+context.defineComputed('nameLiveIs', ()=>'name = '+context.nameLive);
 context.defineComputed('details', ()=>'open' == context.toggle);
 
 const obj = TAL.parse(document.body, context);

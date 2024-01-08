@@ -55,6 +55,17 @@
 
 	class TalError extends Error {}
 
+	let detectingObservables;
+	const
+		detectObservables = () => {
+			detectingObservables || (detectingObservables = []);
+		},
+		getDetectedObservables = () => {
+			let result = detectingObservables;
+			detectingObservables = null;
+			return result;
+		};
+
 	const proxyMap = new WeakMap();
 	function observeObject(obj, parent/*, deep*/)
 	{
@@ -108,13 +119,22 @@
 							return () => observers.dispatchAll(obj);
 						// Vue computed(), Knockout computed()
 						case "defineComputed":
-							return (name, fn, observe) => {
+							return (name, fn) => {
+								detectObservables();
+								fn();
+								getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
 								Object.defineProperty(obj, name, { get: fn });
-								observe && observe.forEach(n => observers.observe(n, () => observers.dispatch(name, fn())));
 							};
 					}
 					if (Reflect.has(target, prop)) {
-						return Reflect.get(target, prop, receiver);
+						if (detectingObservables) {
+							detectingObservables.push([proxy, prop]);
+						}
+						let result = Reflect.get(target, prop, receiver);
+						if (isFunction(result)) {
+							result = result.bind(proxy);
+						}
+						return result;
 					}
 					if (typeof prop !== 'symbol') {
 						if (parent) {
@@ -125,6 +145,9 @@
 					}
 				},
 				set(target, prop, value, receiver) {
+					if (detectingObservables) {
+						return true;
+					}
 					switch (prop)
 					{
 						case "observe":
@@ -181,9 +204,11 @@
 						return () => observers.dispatchAll(obj);
 					// Vue computed(), Knockout computed()
 					case "defineComputed":
-						return (name, fn, observe) => {
+						return (name, fn) => {
+							detectObservables();
+							fn();
+							getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
 							Object.defineProperty(obj, name, { get: fn });
-							observe && observe.forEach(n => observers.observe(n, () => observers.dispatch(name, fn())));
 						};
 					}
 					if (Reflect.has(target, prop)) {
@@ -221,7 +246,14 @@
 								return result;
 							};
 						}
-						return Reflect.get(target, prop, receiver);
+						if (detectingObservables) {
+							detectingObservables.push([proxy, prop]);
+						}
+						let result = Reflect.get(target, prop, receiver);
+						if (isFunction(result)) {
+							result = result.bind(proxy);
+						}
+						return result;
 	//					let value = Reflect.get(target, prop, receiver);
 	//					return isFunction(value) ? value.bind(target) : value;
 					}
@@ -234,6 +266,9 @@
 					}
 				},
 				set(target, prop, value) {
+					if (detectingObservables) {
+						return true;
+					}
 					if (target[prop] !== value) {
 						target[prop] = value;
 						if ("length" === prop) {
@@ -286,7 +321,7 @@
 				: null;
 		}
 
-		static path(context, expr) {
+		static path(context, expr, writer) {
 			let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
 			if (match) {
 				if (!isObserved(context)) {
@@ -309,7 +344,11 @@
 					}
 					context = newContext;
 				}
-				return [context, match[l]];
+				let fn = context[match[l]];
+				if (!isFunction(fn)) {
+					fn = (writer ? value => context[match[l]] = value : () => context[match[l]]).bind(context);
+				}
+				return fn;
 			}
 		}
 
@@ -339,7 +378,21 @@
 				[...node.childNodes].forEach(removeNode);
 				node.remove();
 			}
-		};
+		},
+		resolveTales = (context, expression) => {
+			let fn = Tales.js(context, expression);
+			if (!fn) {
+				fn = Tales.path(context, expression);
+				if (!fn) {
+					console.error(`Path '${expression}' not found`, context);
+				}
+			}
+			return fn;
+		},
+		processDetectedObservables = (el, fn) =>
+			getDetectedObservables().forEach(([obj, prop]) =>
+				observe(el, obj, prop, fn)
+			);
 
 	class Statements
 	{
@@ -353,19 +406,15 @@
 				attr = attr.trim().match(/^([^\s]+)\s+(.+)$/);
 				let text = Tales.string(attr[2]);
 				if (null == text) {
-					let path = Tales.path(context, attr[2]);
-					if (path) {
-						text = path[0][path[1]];
-						if (isFunction(text)) {
-							text = text();
-						} else {
-							observe(el, path[0], path[1], value => {
-								el.setAttribute(attr[1], value);
-								el[attr[1]] = value;
-							});
-						}
-					} else {
-						console.error(`Path '${value}' not found`, context);
+					let getter = resolveTales(context, attr[2]);
+					if (getter) {
+						detectObservables();
+						text = getter(context);
+						processDetectedObservables(el, value => {
+							value = getter(context);
+							el.setAttribute(attr[1], value);
+							el[attr[1]] = value;
+						});
 					}
 				}
 				el.setAttribute(attr[1], text);
@@ -382,21 +431,11 @@
 				text = Tales.string(expression),
 				mode = "structure" === match[1] ? "innerHTML" : "textContent";
 			if (null == text) {
-				let js = Tales.js(context, expression);
-				if (js) {
-					text = js(context);
-				} else {
-					let path = Tales.path(context, expression);
-					if (path) {
-						text = path[0][path[1]];
-						if (isFunction(text)) {
-							text = text();
-						} else {
-							observe(el, path[0], path[1], value => el[mode] = value);
-						}
-					} else {
-						console.error(`Path '${value}' not found`, context);
-					}
+				let getter = resolveTales(context, expression);
+				if (getter) {
+					detectObservables();
+					text = getter(context);
+					processDetectedObservables(el, () => el[mode] = getter());
 				}
 			}
 			el[mode] = text;
@@ -417,34 +456,29 @@
 				fn = string => el.replaceWith(string);
 			}
 			if (null == text) {
-				let path = Tales.path(context, expression);
-				if (path) {
-					text = path[0][path[1]];
-					if (isFunction(text)) {
-						text = text();
+				let getter = resolveTales(context, expression);
+				if (getter) {
+					if ("structure" === match[1]) {
+						// Because the Element is replaced, it is gone
+						// So we prepend an empty TextNode as reference
+						let node = document.createTextNode(""), frag;
+						el.replaceWith(node);
+						// Now we can put/replace the HTML after the empty TextNode
+						fn = string => {
+							frag && frag.forEach(el => el.remove());
+							const template = document.createElement("template");
+							template.innerHTML = string.trim();
+							frag = Array.from(template.content.childNodes);
+							node.after(template.content);
+						};
 					} else {
-						if ("structure" === match[1]) {
-							// Because the Element is replaced, it is gone
-							// So we prepend an empty TextNode as reference
-							let node = document.createTextNode(""), frag;
-							el.replaceWith(node);
-							// Now we can put/replace the HTML after the empty TextNode
-							fn = string => {
-								frag && frag.forEach(el => el.remove());
-								const template = document.createElement("template");
-								template.innerHTML = string.trim();
-								frag = Array.from(template.content.childNodes);
-								node.after(template.content);
-							};
-						} else {
-							let node = document.createTextNode("");
-							el.replaceWith(node);
-							fn = string => node.nodeValue = string;
-						}
-						observe(el, path[0], path[1], fn);
+						let node = document.createTextNode("");
+						el.replaceWith(node);
+						fn = string => node.nodeValue = string;
 					}
-				} else {
-					console.error(`Path '${value}' not found`, context);
+					detectObservables();
+					text = getter(context);
+					processDetectedObservables(el, () => fn(getter(context)));
 				}
 			}
 			fn(text);
@@ -482,16 +516,11 @@
 					}
 				};
 			if (null == text) {
-				let path = Tales.path(context, expression);
-				if (path) {
-					text = path[0][path[1]];
-					if (isFunction(text)) {
-						text = text();
-					} else {
-						observe(el, path[0], path[1], fn);
-					}
-				} else {
-					console.error(`Path '${expression}' not found`, context);
+				let getter = resolveTales(context, expression);
+				if (getter) {
+					detectObservables();
+					text = getter(context);
+					processDetectedObservables(el, () => fn(getter(context)));
 				}
 			}
 			fn(text);
@@ -581,7 +610,7 @@
 				}
 			});
 
-			context[value[2]] = observable;
+			context[match[2]] = observable;
 
 			// Fill the list with current repeat values
 			array.forEach((value, pos) => items.add(value, pos));
@@ -595,14 +624,11 @@
 		 */
 		static ["omit-tag"](el, expression, context) {
 			if (expression) {
-				let path = Tales.path(context, expression);
-				if (path) {
-					expression = path[0][path[1]];
-					if (isFunction(expression)) {
-						expression = expression();
-					}
-				} else {
-					console.error(`Path '${expression}' not found`, context);
+				let getter = resolveTales(context, expression);
+				if (getter) {
+	//				detectObservables();
+					expression = getter(context);
+	//				processDetectedObservables(el, () => fn(getter(context)));
 				}
 			} else {
 				expression = true;
@@ -627,20 +653,20 @@
 			value.split(";").forEach(attr => {
 				if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
 					if (!Tales.string(attr[2]) && el instanceof HTMLElement) {
-						const path = Tales.path(context, attr[2]),
-							ctx = path ? path[0] : context,
-							prop = path ? path[1] : attr[2];
-						if ("value" === attr[1] || "checked" === attr[1]) {
-							el.addEventListener("change", () => ctx[prop] = el[attr[1]]);
-						}
-						if ("input" === attr[1]) {
-							el.addEventListener(attr[1], () => ctx[prop] = el.value);
-						}
-						if ("toggle" === attr[1]) {
-							el.addEventListener(attr[1], event => ctx[prop] = event.newState);
-						}
-						if ("click" === attr[1]) {
-							el.addEventListener(attr[1], event => ctx[prop](event));
+						const setter = Tales.path(context, attr[2], true);
+						if (setter) {
+							if ("value" === attr[1] || "checked" === attr[1]) {
+								el.addEventListener("change", () => setter(el[attr[1]]));
+							}
+							if ("input" === attr[1]) {
+								el.addEventListener(attr[1], () => setter(el.value));
+							}
+							if ("toggle" === attr[1]) {
+								el.addEventListener(attr[1], event => setter(event.newState));
+							}
+							if ("click" === attr[1]) {
+								el.addEventListener(attr[1], setter);
+							}
 						}
 					}
 				}

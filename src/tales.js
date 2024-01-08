@@ -1,5 +1,5 @@
 import { observeObject, isObserved } from 'observers/object';
-import { TalError } from 'common';
+import { isFunction, TalError } from 'common';
 
 /**
  * This can be very complex, like:
@@ -27,7 +27,7 @@ export class Tales
 			: null;
 	}
 
-	static path(context, expr) {
+	static path(context, expr, writer) {
 		let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
 		if (match) {
 			if (!isObserved(context)) {
@@ -50,7 +50,11 @@ export class Tales
 				}
 				context = newContext;
 			}
-			return [context, match[l]];
+			let fn = context[match[l]];
+			if (!isFunction(fn)) {
+				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]).bind(context);
+			}
+			return fn;
 		}
 	}
 

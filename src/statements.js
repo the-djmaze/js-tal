@@ -1,6 +1,6 @@
 import { isFunction, nullObject } from 'common';
 import { Tales } from 'tales';
-import { observeObject, observeArrayObject } from 'observers/object';
+import { observeObject, observeArrayObject, detectObservables, getDetectedObservables } from 'observers/object';
 
 /**
  * Used for garbage collection as Mutation Observers are not reliable
@@ -20,7 +20,21 @@ const
 			[...node.childNodes].forEach(removeNode);
 			node.remove();
 		}
-	};
+	},
+	resolveTales = (context, expression) => {
+		let fn = Tales.js(context, expression);
+		if (!fn) {
+			fn = Tales.path(context, expression);
+			if (!fn) {
+				console.error(`Path '${expression}' not found`, context);
+			}
+		}
+		return fn;
+	},
+	processDetectedObservables = (el, fn) =>
+		getDetectedObservables().forEach(([obj, prop]) =>
+			observe(el, obj, prop, fn)
+		);
 
 export class Statements
 {
@@ -34,19 +48,15 @@ export class Statements
 			attr = attr.trim().match(/^([^\s]+)\s+(.+)$/);
 			let text = Tales.string(attr[2]);
 			if (null == text) {
-				let path = Tales.path(context, attr[2]);
-				if (path) {
-					text = path[0][path[1]];
-					if (isFunction(text)) {
-						text = text();
-					} else {
-						observe(el, path[0], path[1], value => {
-							el.setAttribute(attr[1], value);
-							el[attr[1]] = value;
-						});
-					}
-				} else {
-					console.error(`Path '${value}' not found`, context);
+				let getter = resolveTales(context, attr[2]);
+				if (getter) {
+					detectObservables();
+					text = getter(context);
+					processDetectedObservables(el, value => {
+						value = getter(context);
+						el.setAttribute(attr[1], value);
+						el[attr[1]] = value;
+					});
 				}
 			}
 			el.setAttribute(attr[1], text);
@@ -63,21 +73,11 @@ export class Statements
 			text = Tales.string(expression),
 			mode = "structure" === match[1] ? "innerHTML" : "textContent";
 		if (null == text) {
-			let js = Tales.js(context, expression);
-			if (js) {
-				text = js(context);
-			} else {
-				let path = Tales.path(context, expression);
-				if (path) {
-					text = path[0][path[1]];
-					if (isFunction(text)) {
-						text = text();
-					} else {
-						observe(el, path[0], path[1], value => el[mode] = value);
-					}
-				} else {
-					console.error(`Path '${value}' not found`, context);
-				}
+			let getter = resolveTales(context, expression);
+			if (getter) {
+				detectObservables();
+				text = getter(context);
+				processDetectedObservables(el, () => el[mode] = getter());
 			}
 		}
 		el[mode] = text;
@@ -98,34 +98,29 @@ export class Statements
 			fn = string => el.replaceWith(string);
 		}
 		if (null == text) {
-			let path = Tales.path(context, expression);
-			if (path) {
-				text = path[0][path[1]];
-				if (isFunction(text)) {
-					text = text();
+			let getter = resolveTales(context, expression);
+			if (getter) {
+				if ("structure" === match[1]) {
+					// Because the Element is replaced, it is gone
+					// So we prepend an empty TextNode as reference
+					let node = document.createTextNode(""), frag;
+					el.replaceWith(node);
+					// Now we can put/replace the HTML after the empty TextNode
+					fn = string => {
+						frag && frag.forEach(el => el.remove());
+						const template = document.createElement("template");
+						template.innerHTML = string.trim();
+						frag = Array.from(template.content.childNodes);
+						node.after(template.content);
+					};
 				} else {
-					if ("structure" === match[1]) {
-						// Because the Element is replaced, it is gone
-						// So we prepend an empty TextNode as reference
-						let node = document.createTextNode(""), frag;
-						el.replaceWith(node);
-						// Now we can put/replace the HTML after the empty TextNode
-						fn = string => {
-							frag && frag.forEach(el => el.remove());
-							const template = document.createElement("template");
-							template.innerHTML = string.trim();
-							frag = Array.from(template.content.childNodes);
-							node.after(template.content);
-						};
-					} else {
-						let node = document.createTextNode("");
-						el.replaceWith(node);
-						fn = string => node.nodeValue = string;
-					}
-					observe(el, path[0], path[1], fn);
+					let node = document.createTextNode("");
+					el.replaceWith(node);
+					fn = string => node.nodeValue = string;
 				}
-			} else {
-				console.error(`Path '${value}' not found`, context);
+				detectObservables();
+				text = getter(context);
+				processDetectedObservables(el, () => fn(getter(context)));
 			}
 		}
 		fn(text);
@@ -163,16 +158,11 @@ export class Statements
 				}
 			};
 		if (null == text) {
-			let path = Tales.path(context, expression);
-			if (path) {
-				text = path[0][path[1]];
-				if (isFunction(text)) {
-					text = text();
-				} else {
-					observe(el, path[0], path[1], fn);
-				}
-			} else {
-				console.error(`Path '${expression}' not found`, context);
+			let getter = resolveTales(context, expression);
+			if (getter) {
+				detectObservables();
+				text = getter(context);
+				processDetectedObservables(el, () => fn(getter(context)));
 			}
 		}
 		fn(text);
@@ -262,7 +252,7 @@ export class Statements
 			}
 		});
 
-		context[value[2]] = observable;
+		context[match[2]] = observable;
 
 		// Fill the list with current repeat values
 		array.forEach((value, pos) => items.add(value, pos));
@@ -276,14 +266,11 @@ export class Statements
 	 */
 	static ["omit-tag"](el, expression, context) {
 		if (expression) {
-			let path = Tales.path(context, expression);
-			if (path) {
-				expression = path[0][path[1]];
-				if (isFunction(expression)) {
-					expression = expression();
-				}
-			} else {
-				console.error(`Path '${expression}' not found`, context);
+			let getter = resolveTales(context, expression);
+			if (getter) {
+//				detectObservables();
+				expression = getter(context);
+//				processDetectedObservables(el, () => fn(getter(context)));
 			}
 		} else {
 			expression = true;
@@ -308,20 +295,20 @@ export class Statements
 		value.split(";").forEach(attr => {
 			if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
 				if (!Tales.string(attr[2]) && el instanceof HTMLElement) {
-					const path = Tales.path(context, attr[2]),
-						ctx = path ? path[0] : context,
-						prop = path ? path[1] : attr[2];
-					if ("value" === attr[1] || "checked" === attr[1]) {
-						el.addEventListener("change", () => ctx[prop] = el[attr[1]]);
-					}
-					if ("input" === attr[1]) {
-						el.addEventListener(attr[1], () => ctx[prop] = el.value);
-					}
-					if ("toggle" === attr[1]) {
-						el.addEventListener(attr[1], event => ctx[prop] = event.newState);
-					}
-					if ("click" === attr[1]) {
-						el.addEventListener(attr[1], event => ctx[prop](event));
+					const setter = Tales.path(context, attr[2], true);
+					if (setter) {
+						if ("value" === attr[1] || "checked" === attr[1]) {
+							el.addEventListener("change", () => setter(el[attr[1]]));
+						}
+						if ("input" === attr[1]) {
+							el.addEventListener(attr[1], () => setter(el.value));
+						}
+						if ("toggle" === attr[1]) {
+							el.addEventListener(attr[1], event => setter(event.newState));
+						}
+						if ("click" === attr[1]) {
+							el.addEventListener(attr[1], setter);
+						}
 					}
 				}
 			}
