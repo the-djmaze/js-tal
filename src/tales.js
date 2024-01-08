@@ -57,7 +57,6 @@ export class Tales
 	static js(context, expr) {
 		expr = expr.trim().match(/^(?:js:)(.*)$/);
 		if (expr) {
-			console.log(`with($context){return ${expr[1]}}`);
 			return new Function("$context", `with($context){return ${expr[1]}}`);
 		}
 	}

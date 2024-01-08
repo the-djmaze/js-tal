@@ -65,7 +65,6 @@ export class Statements
 		if (null == text) {
 			let js = Tales.js(context, expression);
 			if (js) {
-				console.dir(js);
 				text = js(context);
 			} else {
 				let path = Tales.path(context, expression);
