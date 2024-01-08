@@ -4,7 +4,7 @@ const proxyMap = new WeakMap();
 export function observeObject(obj, parent/*, deep*/)
 {
 	if (Array.isArray(obj)) {
-		return observeArrayObject(obj/*, deep*/);
+		return observeArrayObject(obj, parent/*, deep*/);
 	}
 	if (!isObject(obj)) {
 		return obj;
@@ -15,7 +15,6 @@ export function observeObject(obj, parent/*, deep*/)
 
 	let proxy = proxyMap.get(obj);
 	if (!proxy) {
-//		obj[IS_PROXY] = 2;
 /*
 		// If deep doesn't evaluate to true, only a shallow proxy is created
 		if (deep) {
@@ -32,6 +31,9 @@ export function observeObject(obj, parent/*, deep*/)
 	}
 */
 //		Object.defineProperty(obj, 'isProxy', { get: function(){return this === obj;} });
+		if (!parent || !parent[IS_PROXY]) {
+			parent = undefined;
+		}
 		const observers = new Observers;
 		proxy = new Proxy(obj, {
 			get(target, prop, receiver) {
@@ -59,12 +61,13 @@ export function observeObject(obj, parent/*, deep*/)
 				if (Reflect.has(target, prop)) {
 					return Reflect.get(target, prop, receiver);
 				}
-				if (parent) {
-					parent[prop];
-				} else {
-					console.error(`Undefined property '${prop}' in current scope`);
+				if (typeof prop !== 'symbol') {
+					if (parent) {
+						return parent[prop];
+					} else {
+						console.error(`Undefined property '${prop}' in current scope`);
+					}
 				}
-				return Reflect.get(target, prop, receiver);
 			},
 			set(target, prop, value, receiver) {
 				switch (prop)
@@ -90,7 +93,7 @@ export function observeObject(obj, parent/*, deep*/)
 	return proxy;
 }
 
-export function observeArrayObject(obj/*, deep*/)
+export function observeArrayObject(obj, parent/*, deep*/)
 {
 //	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
 	if (!Array.isArray(obj)) {
@@ -101,12 +104,12 @@ export function observeArrayObject(obj/*, deep*/)
 	}
 	let proxy = proxyMap.get(obj);
 	if (!proxy) {
-//		obj[IS_PROXY] = 2;
-		obj.forEach((item, index) => obj[index] = observeObject(item));
-
+		if (!parent || !parent[IS_PROXY]) {
+			parent = undefined;
+		}
 		const observers = new Observers;
 		proxy = new Proxy(obj, {
-			get(target, prop/*, receiver*/) {
+			get(target, prop, receiver) {
 				switch (prop)
 				{
 				case IS_PROXY: return 1;
@@ -128,7 +131,7 @@ export function observeArrayObject(obj/*, deep*/)
 						observe && observe.forEach(n => observers.observe(n, () => observers.dispatch(name, fn())));
 					};
 				}
-				if (prop in target) {
+				if (Reflect.has(target, prop)) {
 					switch (prop)
 					{
 					// Set
@@ -157,15 +160,22 @@ export function observeArrayObject(obj/*, deep*/)
 					case "splice":
 					case "push":
 						return (...args) => {
-							args = args.map(obj => observeObject(obj));
+							args = args.map(obj => observeObject(obj, proxy));
 							let result = target[prop](...args);
 							observers.dispatch(prop, args);
 							return result;
 						};
 					}
-					return target[prop];
+					return Reflect.get(target, prop, receiver);
 //					let value = Reflect.get(target, prop, receiver);
 //					return isFunction(value) ? value.bind(target) : value;
+				}
+				if (typeof prop !== 'symbol') {
+					if (parent) {
+						return parent[prop];
+					} else {
+						console.error(`Undefined property '${prop}' in current scope`);
+					}
 				}
 			},
 			set(target, prop, value) {
@@ -174,7 +184,7 @@ export function observeArrayObject(obj/*, deep*/)
 					if ("length" === prop) {
 						observers.dispatch(prop, value);
 					} else if (isFinite(prop)) {
-						value = observeObject(value);
+						value = observeObject(value, proxy);
 						observers.dispatch("set", {index:prop, value});
 					}
 					target[prop] = value;
@@ -182,6 +192,8 @@ export function observeArrayObject(obj/*, deep*/)
 				return true;
 			}
 		});
+
+		obj.forEach((item, index) => obj[index] = observeObject(item, proxy));
 
 		proxyMap.set(obj, proxy);
 	}

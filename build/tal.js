@@ -59,7 +59,7 @@
 	function observeObject(obj, parent/*, deep*/)
 	{
 		if (Array.isArray(obj)) {
-			return observeArrayObject(obj/*, deep*/);
+			return observeArrayObject(obj, parent/*, deep*/);
 		}
 		if (!isObject(obj)) {
 			return obj;
@@ -70,7 +70,6 @@
 
 		let proxy = proxyMap.get(obj);
 		if (!proxy) {
-	//		obj[IS_PROXY] = 2;
 	/*
 			// If deep doesn't evaluate to true, only a shallow proxy is created
 			if (deep) {
@@ -87,6 +86,9 @@
 		}
 	*/
 	//		Object.defineProperty(obj, 'isProxy', { get: function(){return this === obj;} });
+			if (!parent || !parent[IS_PROXY]) {
+				parent = undefined;
+			}
 			const observers = new Observers;
 			proxy = new Proxy(obj, {
 				get(target, prop, receiver) {
@@ -114,12 +116,13 @@
 					if (Reflect.has(target, prop)) {
 						return Reflect.get(target, prop, receiver);
 					}
-					if (parent) {
-						parent[prop];
-					} else {
-						console.error(`Undefined property '${prop}' in current scope`);
+					if (typeof prop !== 'symbol') {
+						if (parent) {
+							return parent[prop];
+						} else {
+							console.error(`Undefined property '${prop}' in current scope`);
+						}
 					}
-					return Reflect.get(target, prop, receiver);
 				},
 				set(target, prop, value, receiver) {
 					switch (prop)
@@ -145,7 +148,7 @@
 		return proxy;
 	}
 
-	function observeArrayObject(obj/*, deep*/)
+	function observeArrayObject(obj, parent/*, deep*/)
 	{
 	//	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
 		if (!Array.isArray(obj)) {
@@ -156,12 +159,12 @@
 		}
 		let proxy = proxyMap.get(obj);
 		if (!proxy) {
-	//		obj[IS_PROXY] = 2;
-			obj.forEach((item, index) => obj[index] = observeObject(item));
-
+			if (!parent || !parent[IS_PROXY]) {
+				parent = undefined;
+			}
 			const observers = new Observers;
 			proxy = new Proxy(obj, {
-				get(target, prop/*, receiver*/) {
+				get(target, prop, receiver) {
 					switch (prop)
 					{
 					case IS_PROXY: return 1;
@@ -183,7 +186,7 @@
 							observe && observe.forEach(n => observers.observe(n, () => observers.dispatch(name, fn())));
 						};
 					}
-					if (prop in target) {
+					if (Reflect.has(target, prop)) {
 						switch (prop)
 						{
 						// Set
@@ -212,15 +215,22 @@
 						case "splice":
 						case "push":
 							return (...args) => {
-								args = args.map(obj => observeObject(obj));
+								args = args.map(obj => observeObject(obj, proxy));
 								let result = target[prop](...args);
 								observers.dispatch(prop, args);
 								return result;
 							};
 						}
-						return target[prop];
+						return Reflect.get(target, prop, receiver);
 	//					let value = Reflect.get(target, prop, receiver);
 	//					return isFunction(value) ? value.bind(target) : value;
+					}
+					if (typeof prop !== 'symbol') {
+						if (parent) {
+							return parent[prop];
+						} else {
+							console.error(`Undefined property '${prop}' in current scope`);
+						}
 					}
 				},
 				set(target, prop, value) {
@@ -229,7 +239,7 @@
 						if ("length" === prop) {
 							observers.dispatch(prop, value);
 						} else if (isFinite(prop)) {
-							value = observeObject(value);
+							value = observeObject(value, proxy);
 							observers.dispatch("set", {index:prop, value});
 						}
 						target[prop] = value;
@@ -237,6 +247,8 @@
 					return true;
 				}
 			});
+
+			obj.forEach((item, index) => obj[index] = observeObject(item, proxy));
 
 			proxyMap.set(obj, proxy);
 		}
@@ -275,32 +287,60 @@
 		}
 
 		static path(context, expr) {
-			expr = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
-			if (expr) {
+			let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
+			if (match) {
 				if (!isObserved(context)) {
 					throw new TalError(`context '${expr}' can't be observed`);
 				}
-				expr = expr[1].trim().split("/");
-				let i = 0, l = expr.length - 1;
+				match = match[1].trim().split("/");
+				let i = 0, l = match.length - 1;
 				for (; i < l; ++i) {
-					if (!(expr[i] in context)) {
+					if (!(match[i] in context)) {
 						return;
 					}
-					let newContext = context[expr[i]];
+					let newContext = context[match[i]];
 					if (!isObserved(newContext)) {
-						newContext = observeObject(newContext);
+						newContext = observeObject(newContext, context[match[i]]);
 						try {
-							context[expr[i]] = newContext;
+							context[match[i]] = newContext;
 						} catch (e) {
-							console.error(e,{context, prop:expr[i]});
+							console.error(e,{context, prop:match[i]});
 						}
 					}
 					context = newContext;
 				}
-				return [context, expr[l]];
+				return [context, match[l]];
+			}
+		}
+
+		static js(context, expr) {
+			expr = expr.trim().match(/^(?:js:)(.*)$/);
+			if (expr) {
+				console.log(`with($context){return ${expr[1]}}`);
+				return new Function("$context", `with($context){return ${expr[1]}}`);
 			}
 		}
 	}
+
+	/**
+	 * Used for garbage collection as Mutation Observers are not reliable
+	 */
+	const
+		observables = Symbol("observables"),
+		observe = (el, obj, prop, cb) =>
+		{
+			obj.observe(prop, cb);
+			el[observables] || (el[observables] = new Set);
+			el[observables].add(()=>obj.unobserve(prop, cb));
+		},
+		removeNode = node => {
+			if (node) {
+				node[observables]?.forEach?.(cb => cb());
+				delete node[observables];
+				[...node.childNodes].forEach(removeNode);
+				node.remove();
+			}
+		};
 
 	class Statements
 	{
@@ -320,7 +360,7 @@
 						if (isFunction(text)) {
 							text = text();
 						} else {
-							path[0].observe(path[1], value => {
+							observe(el, path[0], path[1], value => {
 								el.setAttribute(attr[1], value);
 								el[attr[1]] = value;
 							});
@@ -343,16 +383,22 @@
 				text = Tales.string(expression),
 				mode = "structure" === match[1] ? "innerHTML" : "textContent";
 			if (null == text) {
-				let path = Tales.path(context, expression);
-				if (path) {
-					text = path[0][path[1]];
-					if (isFunction(text)) {
-						text = text();
-					} else {
-						path[0].observe(path[1], value => el[mode] = value);
-					}
+				let js = Tales.js(context, expression);
+				if (js) {
+					console.dir(js);
+					text = js(context);
 				} else {
-					console.error(`Path '${value}' not found`, context);
+					let path = Tales.path(context, expression);
+					if (path) {
+						text = path[0][path[1]];
+						if (isFunction(text)) {
+							text = text();
+						} else {
+							observe(el, path[0], path[1], value => el[mode] = value);
+						}
+					} else {
+						console.error(`Path '${value}' not found`, context);
+					}
 				}
 			}
 			el[mode] = text;
@@ -397,7 +443,7 @@
 							el.replaceWith(node);
 							fn = string => node.nodeValue = string;
 						}
-						path[0].observe(path[1], fn);
+						observe(el, path[0], path[1], fn);
 					}
 				} else {
 					console.error(`Path '${value}' not found`, context);
@@ -429,7 +475,8 @@
 			let tree = el.cloneNode(true),
 				text = Tales.string(expression),
 				fn = value => {
-					el.textContent = "";
+					[...el.childNodes].forEach(removeNode);
+	//				el.textContent = "";
 					if (value) {
 						let node = tree.cloneNode(true);
 						parser(node, context);
@@ -443,7 +490,7 @@
 					if (isFunction(text)) {
 						text = text();
 					} else {
-						path[0].observe(path[1], fn);
+						observe(el, path[0], path[1], fn);
 					}
 				} else {
 					console.error(`Path '${expression}' not found`, context);
@@ -463,29 +510,22 @@
 		 * </div>
 		 */
 		static repeat(el, value, context, parser) {
-			value = value.trim().match(/^([^\s]+)\s+(.+)$/);
-	//		console.dir({value});
+			const match = value.trim().match(/^([^\s]+)\s+(.+)$/);
+	//		console.dir({match});
 	//		context = TalContext;
 	//		context = observeObject(context[repeater.prop]);
 	//		contextTree.push(context);
 			const items = [],
-				array = context[value[2]],
+				array = context[match[2]],
 				target = el.ownerDocument.createTextNode(""),
-				createItem = context => {
+				createItem = value => {
 					let node = el.cloneNode(true);
-					let subContext = observeObject(nullObject());
-	/*
-					try {
-						context = observeObject(context);
-					} catch (err) {
-						console.error(err);
-					}
-	*/
-					subContext.defineComputed(value[1], () => context);
+					let subContext = observeObject(nullObject(), context);
+					subContext.defineComputed(match[1], () => value);
 					parser(node, subContext);
 					return node;
 				};
-			items.name = value[1];
+			items.name = match[1];
 			items.hasChild = node => el.contains(node);
 			items.add = (value, pos) => {
 				let node = createItem(value);
@@ -506,37 +546,34 @@
 
 			el.replaceWith(target);
 
-			let observable = observeArrayObject(array);
-			observable.observe("clear", () => {
-				items.forEach(item => item.remove());
+			let observable = observeArrayObject(array, context);
+			observe(el, observable, "clear", () => {
+				items.forEach(removeNode);
 				items.length = 0;
 			});
-			observable.observe("shift", () => {
-				let item = items.shift();
-				item && item.remove();
-			});
-			observable.observe("unshift", (args) => {
+			observe(el, observable, "shift", () => removeNode(items.shift()));
+			observe(el, observable, "unshift", (args) => {
 				let i = args.length;
 				while (i--) items.add(args[i], 0);
 	//			args.forEach((item, i) => items.add(item, i));
 			});
-			observable.observe("splice", (args) => {
+			observe(el, observable, "splice", (args) => {
 				if (0 < args[1]) {
 					let i = Math.min(items.length, args[0] + args[1]);
-					while (args[0] < i--) items[i].remove();
+					while (args[0] < i--) removeNode(items[i]);
 					items.splice(args[0], args[1]);
 				}
 				for (let i = 2; i < args.length; ++i) {
 					items.add(args[i], args[0]);
 				}
 			});
-			observable.observe("push", (args) => {
+			observe(el, observable, "push", (args) => {
 				args.forEach(item => items.add(item));
 			});
-			observable.observe("length", length => {
-				while (items.length > length) items.pop().remove();
+			observe(el, observable, "length", length => {
+				while (items.length > length) removeNode(items.pop());
 			});
-			observable.observe("set", item => {
+			observe(el, observable, "set", item => {
 				if (item.index in items) {
 					let node = createItem(item.value);
 					items[item.index].replaceWith(node);

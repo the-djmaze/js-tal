@@ -9,8 +9,8 @@
 <body>
 
 <button tal:listen="click toggleCondition">toggle condition true/false</button>
-<div id="tal-condition" tal:condition="foobar">
-	<div id="tal-define" tal:define="variable_name 'foobar'">
+<div class="tal-condition" tal:condition="foobar">
+	<div class="tal-define" tal:define="variable_name 'foobar'">
 		<ul>
 			<li><b>tal-repeat Array or Set</b>
 				<br/>
@@ -23,6 +23,7 @@
 			<li class="tal-repeat" tal:repeat="item list" tal:content="item">this content is replaced</li>
 			<li class="tal-repeat" tal:repeat="item list">
 				<b tal:content="item">this content is replaced</b>
+				<var tal:content="variable_name"></var>
 			</li>
 		</ul>
 
@@ -39,6 +40,7 @@
 			<li class="tal-repeat" tal:repeat="item list2">
 				<b tal:content="item/id">this content is replaced</b>
 				<var tal:replace="item/name">this content is replaced</var>
+				<var tal:content="variable_name"></var>
 			</li>
 		</ul>
 
@@ -51,22 +53,22 @@
 		<var tal:content="name"></var>
 
 		<hr/>
-		<input id="tal-attributes" tal:attributes="value nameLive; type 'text'" tal:listen="input nameLive"/>
+		<input tal:attributes="value nameLive; type 'text'" tal:listen="input nameLive"/>
 		<br/>
 		<var tal:content="nameLive"></var>
 		<br/>
 		<var tal:content="nameLiveIs"></var>
 
 		<hr/>
-		<div id="tal-omit-tag" tal:omit-tag="">omit-tag</div>
-		<div id="tal-omit-tag" tal:omit-tag="omit">don't omit-tag</div>
+		<div class="tal-omit-tag" tal:omit-tag="">omit-tag</div>
+		<div class="tal-omit-tag" tal:omit-tag="omit">don't omit-tag</div>
 
 		<hr/>
-		<div id="tal-replace" tal:replace="'replaced div'"></div>
-		<div id="tal-content" tal:content="variable_name"></div>
+		<div class="tal-replace" tal:replace="'replaced div'"></div>
+		<div class="tal-content" tal:content="variable_name"></div>
 
-		<div id="tal-replace" tal:replace="structure html"></div>
-		<div id="tal-content" tal:content="structure html"></div>
+		<div class="tal-replace" tal:replace="structure html"></div>
+		<div class="tal-content" tal:content="structure html"></div>
 		<button tal:listen="click setHTML">setHTML</button>
 	</div>
 
@@ -83,6 +85,9 @@
 
 	<hr/>
 	<b tal:content="'tal-content string'">tal-content</b>
+
+	<hr/>
+	<b tal:content="js:'js:variable_name = ' + variable_name">js:variable_name</b>
 </div>
 
 <script>

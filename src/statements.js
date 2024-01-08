@@ -2,6 +2,26 @@ import { isFunction, nullObject } from 'common';
 import { Tales } from 'tales';
 import { observeObject, observeArrayObject } from 'observers/object';
 
+/**
+ * Used for garbage collection as Mutation Observers are not reliable
+ */
+const
+	observables = Symbol("observables"),
+	observe = (el, obj, prop, cb) =>
+	{
+		obj.observe(prop, cb);
+		el[observables] || (el[observables] = new Set);
+		el[observables].add(()=>obj.unobserve(prop, cb));
+	},
+	removeNode = node => {
+		if (node) {
+			node[observables]?.forEach?.(cb => cb());
+			delete node[observables];
+			[...node.childNodes].forEach(removeNode);
+			node.remove();
+		}
+	};
+
 export class Statements
 {
 	/**
@@ -20,7 +40,7 @@ export class Statements
 					if (isFunction(text)) {
 						text = text();
 					} else {
-						path[0].observe(path[1], value => {
+						observe(el, path[0], path[1], value => {
 							el.setAttribute(attr[1], value);
 							el[attr[1]] = value;
 						});
@@ -43,16 +63,22 @@ export class Statements
 			text = Tales.string(expression),
 			mode = "structure" === match[1] ? "innerHTML" : "textContent";
 		if (null == text) {
-			let path = Tales.path(context, expression);
-			if (path) {
-				text = path[0][path[1]];
-				if (isFunction(text)) {
-					text = text();
-				} else {
-					path[0].observe(path[1], value => el[mode] = value);
-				}
+			let js = Tales.js(context, expression);
+			if (js) {
+				console.dir(js);
+				text = js(context);
 			} else {
-				console.error(`Path '${value}' not found`, context);
+				let path = Tales.path(context, expression);
+				if (path) {
+					text = path[0][path[1]];
+					if (isFunction(text)) {
+						text = text();
+					} else {
+						observe(el, path[0], path[1], value => el[mode] = value);
+					}
+				} else {
+					console.error(`Path '${value}' not found`, context);
+				}
 			}
 		}
 		el[mode] = text;
@@ -97,7 +123,7 @@ export class Statements
 						el.replaceWith(node);
 						fn = string => node.nodeValue = string;
 					}
-					path[0].observe(path[1], fn);
+					observe(el, path[0], path[1], fn);
 				}
 			} else {
 				console.error(`Path '${value}' not found`, context);
@@ -129,7 +155,8 @@ export class Statements
 		let tree = el.cloneNode(true),
 			text = Tales.string(expression),
 			fn = value => {
-				el.textContent = "";
+				[...el.childNodes].forEach(removeNode);
+//				el.textContent = "";
 				if (value) {
 					let node = tree.cloneNode(true);
 					parser(node, context);
@@ -143,7 +170,7 @@ export class Statements
 				if (isFunction(text)) {
 					text = text();
 				} else {
-					path[0].observe(path[1], fn);
+					observe(el, path[0], path[1], fn);
 				}
 			} else {
 				console.error(`Path '${expression}' not found`, context);
@@ -163,29 +190,22 @@ export class Statements
 	 * </div>
 	 */
 	static repeat(el, value, context, parser) {
-		value = value.trim().match(/^([^\s]+)\s+(.+)$/);
-//		console.dir({value});
+		const match = value.trim().match(/^([^\s]+)\s+(.+)$/);
+//		console.dir({match});
 //		context = TalContext;
 //		context = observeObject(context[repeater.prop]);
 //		contextTree.push(context);
 		const items = [],
-			array = context[value[2]],
+			array = context[match[2]],
 			target = el.ownerDocument.createTextNode(""),
-			createItem = context => {
+			createItem = value => {
 				let node = el.cloneNode(true);
-				let subContext = observeObject(nullObject());
-/*
-				try {
-					context = observeObject(context);
-				} catch (err) {
-					console.error(err);
-				}
-*/
-				subContext.defineComputed(value[1], () => context);
+				let subContext = observeObject(nullObject(), context);
+				subContext.defineComputed(match[1], () => value);
 				parser(node, subContext);
 				return node;
 			};
-		items.name = value[1];
+		items.name = match[1];
 		items.hasChild = node => el.contains(node);
 		items.add = (value, pos) => {
 			let node = createItem(value);
@@ -206,37 +226,34 @@ export class Statements
 
 		el.replaceWith(target);
 
-		let observable = observeArrayObject(array);
-		observable.observe("clear", () => {
-			items.forEach(item => item.remove());
+		let observable = observeArrayObject(array, context);
+		observe(el, observable, "clear", () => {
+			items.forEach(removeNode);
 			items.length = 0;
 		});
-		observable.observe("shift", () => {
-			let item = items.shift();
-			item && item.remove();
-		});
-		observable.observe("unshift", (args) => {
+		observe(el, observable, "shift", () => removeNode(items.shift()));
+		observe(el, observable, "unshift", (args) => {
 			let i = args.length;
 			while (i--) items.add(args[i], 0);
 //			args.forEach((item, i) => items.add(item, i));
 		});
-		observable.observe("splice", (args) => {
+		observe(el, observable, "splice", (args) => {
 			if (0 < args[1]) {
 				let i = Math.min(items.length, args[0] + args[1]);
-				while (args[0] < i--) items[i].remove();
+				while (args[0] < i--) removeNode(items[i]);
 				items.splice(args[0], args[1]);
 			}
 			for (let i = 2; i < args.length; ++i) {
 				items.add(args[i], args[0]);
 			}
 		});
-		observable.observe("push", (args) => {
+		observe(el, observable, "push", (args) => {
 			args.forEach(item => items.add(item));
 		});
-		observable.observe("length", length => {
-			while (items.length > length) items.pop().remove();
+		observe(el, observable, "length", length => {
+			while (items.length > length) removeNode(items.pop());
 		});
-		observable.observe("set", item => {
+		observe(el, observable, "set", item => {
 			if (item.index in items) {
 				let node = createItem(item.value);
 				items[item.index].replaceWith(node);

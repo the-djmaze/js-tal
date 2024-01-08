@@ -28,29 +28,37 @@ export class Tales
 	}
 
 	static path(context, expr) {
-		expr = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
-		if (expr) {
+		let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
+		if (match) {
 			if (!isObserved(context)) {
 				throw new TalError(`context '${expr}' can't be observed`);
 			}
-			expr = expr[1].trim().split("/");
-			let i = 0, l = expr.length - 1;
+			match = match[1].trim().split("/");
+			let i = 0, l = match.length - 1;
 			for (; i < l; ++i) {
-				if (!(expr[i] in context)) {
+				if (!(match[i] in context)) {
 					return;
 				}
-				let newContext = context[expr[i]];
+				let newContext = context[match[i]];
 				if (!isObserved(newContext)) {
-					newContext = observeObject(newContext);
+					newContext = observeObject(newContext, context[match[i]]);
 					try {
-						context[expr[i]] = newContext;
+						context[match[i]] = newContext;
 					} catch (e) {
-						console.error(e,{context, prop:expr[i]});
+						console.error(e,{context, prop:match[i]});
 					}
 				}
 				context = newContext;
 			}
-			return [context, expr[l]];
+			return [context, match[l]];
+		}
+	}
+
+	static js(context, expr) {
+		expr = expr.trim().match(/^(?:js:)(.*)$/);
+		if (expr) {
+			console.log(`with($context){return ${expr[1]}}`);
+			return new Function("$context", `with($context){return ${expr[1]}}`);
 		}
 	}
 }
