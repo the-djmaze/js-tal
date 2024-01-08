@@ -1,6 +1,7 @@
-import { isFunction, nullObject } from 'common';
+import { isFunction, isObject, isObserved, nullObject } from 'common';
 import { Tales } from 'tales';
 import { observeObject, observeArrayObject, detectObservables, getDetectedObservables } from 'observers/object';
+import { observePrimitive } from 'observers/primitive';
 
 /**
  * Used for garbage collection as Mutation Observers are not reliable
@@ -128,6 +129,7 @@ export class Statements
 
 	/**
 	 * tal:define - define variables.
+	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#define-define-variables
 	 */
 	static define(el, expression, context) {
 		expression.split(";").forEach(def => {
@@ -150,6 +152,7 @@ export class Statements
 
 	/**
 	 * tal:condition - test conditions.
+	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#condition-conditionally-insert-or-remove-an-element
 	 */
 	static condition(el, expression, context, parser) {
 		let tree = el.cloneNode(true),
@@ -176,6 +179,7 @@ export class Statements
 
 	/**
 	 * tal:repeat - repeat an element.
+	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#repeat-repeat-an-element
 	 * This is very complex as it creates a deeper context
 	 * Especially when there"s a repeat inside a repeat, like:
 	 * <div tal:repeat="item context/cart">
@@ -194,9 +198,18 @@ export class Statements
 			array = context[match[2]],
 			target = el.ownerDocument.createTextNode(""),
 			createItem = value => {
-				let node = el.cloneNode(true);
-				let subContext = observeObject(nullObject(), context);
-				subContext.defineComputed(match[1], () => value);
+				let node = el.cloneNode(true), subContext;
+				try {
+					value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
+				} catch (e) {
+					console.error(e);
+				}
+				if ('context' == match[1] && isObserved(value)) {
+					subContext = value;
+				} else {
+					subContext = observeObject(nullObject(), context);
+					subContext[match[1]] = value;
+				}
 				parser(node, subContext);
 				return node;
 			};
@@ -289,7 +302,10 @@ export class Statements
 /*
 	tal:switch - define a switch condition
 	tal:case - include element only if expression is equal to parent switch
-	tal:on-error - handle errors.
+
+	static ["on-error"](el, expression, context) {
+		Statements.content(el, expression, context);
+	}
 */
 
 	/**
@@ -297,28 +313,25 @@ export class Statements
 	 * like: HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement, HTMLDetailsElement
 	 */
 	static listen(el, value, context) {
-//		value.matchAll(/([^\s;]+)\s+([^;]+)/);
-		value.split(";").forEach(attr => {
-			if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
-				if (!Tales.string(attr[2]) && el instanceof HTMLElement) {
+		if (el.addEventListener) {
+//			value.matchAll(/([^\s;]+)\s+([^;]+)/);
+			value.split(";").forEach(attr => {
+				if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
 					const setter = Tales.path(attr[2], context, true);
 					if (setter) {
 						if ("value" === attr[1] || "checked" === attr[1]) {
 							el.addEventListener("change", () => setter(el[attr[1]]));
-						}
-						if ("input" === attr[1]) {
+						} else if ("input" === attr[1]) {
 							el.addEventListener(attr[1], () => setter(el.value));
-						}
-						if ("toggle" === attr[1]) {
+						} else if ("toggle" === attr[1]) {
 							el.addEventListener(attr[1], event => setter(event.newState));
-						}
-						if ("click" === attr[1]) {
+						} else {
 							el.addEventListener(attr[1], setter);
 						}
 					}
 				}
-			}
-		});
+			});
+		}
 	}
 }
 

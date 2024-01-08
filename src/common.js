@@ -51,3 +51,8 @@ export class Observers extends Map {
 }
 
 export class TalError extends Error {}
+
+export function isObserved(obj)
+{
+	return isObject(obj) && obj[IS_PROXY];
+}

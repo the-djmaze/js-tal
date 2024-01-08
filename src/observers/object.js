@@ -70,6 +70,14 @@ export function observeObject(obj, parent/*, deep*/)
 							getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
 							Object.defineProperty(obj, name, { get: fn });
 						};
+					/**
+					 * TAL built-in Names
+					 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
+					 */
+					case "root":
+						return parent ? parent[prop] : proxy;
+					case "context":
+						return proxy;
 				}
 				if (Reflect.has(target, prop)) {
 					if (detectingObservables) {
@@ -84,9 +92,8 @@ export function observeObject(obj, parent/*, deep*/)
 				if (typeof prop !== 'symbol') {
 					if (parent) {
 						return parent[prop];
-					} else {
-						console.error(`Undefined property '${prop}' in current scope`);
 					}
+					console.error(`Undefined property '${prop}' in current scope`);
 				}
 			},
 			set(target, prop, value, receiver) {
@@ -100,6 +107,8 @@ export function observeObject(obj, parent/*, deep*/)
 					case "clearObservers":
 					case "refreshObservers":
 					case "defineComputed":
+					case "root":
+					case "context":
 						throw new TalError(`${prop} can't be initialized, it is internal`);
 
 				}
@@ -135,26 +144,34 @@ export function observeArrayObject(obj, parent/*, deep*/)
 			get(target, prop, receiver) {
 				switch (prop)
 				{
-				case IS_PROXY: return 1;
-				// Vue watch(), Knockout subscribe()
-				case "observe":
-//					callback(obj[property], property);
-					// fallthrough
-				case "unobserve":
-//					return (property, callback) => observers[prop](property, callback);
-					return observers[prop].bind(observers);
-				case "clearObservers":
-					return () => observers.clear();
-				case "refreshObservers":
-					return () => observers.dispatchAll(obj);
-				// Vue computed(), Knockout computed()
-				case "defineComputed":
-					return (name, fn) => {
-						detectObservables();
-						fn();
-						getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
-						Object.defineProperty(obj, name, { get: fn });
-					};
+					case IS_PROXY: return 1;
+					// Vue watch(), Knockout subscribe()
+					case "observe":
+//						callback(obj[property], property);
+						// fallthrough
+					case "unobserve":
+//						return (property, callback) => observers[prop](property, callback);
+						return observers[prop].bind(observers);
+					case "clearObservers":
+						return () => observers.clear();
+					case "refreshObservers":
+						return () => observers.dispatchAll(obj);
+					// Vue computed(), Knockout computed()
+					case "defineComputed":
+						return (name, fn) => {
+							detectObservables();
+							fn();
+							getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
+							Object.defineProperty(obj, name, { get: fn });
+						};
+					/**
+					* TAL built-in Names
+					* https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
+					*/
+					case "root":
+						return parent ? parent[prop] : proxy;
+					case "context":
+						return proxy;
 				}
 				if (Reflect.has(target, prop)) {
 					switch (prop)
@@ -205,9 +222,8 @@ export function observeArrayObject(obj, parent/*, deep*/)
 				if (typeof prop !== 'symbol') {
 					if (parent) {
 						return parent[prop];
-					} else {
-						console.error(`Undefined property '${prop}' in current scope`);
 					}
+					console.error(`Undefined property '${prop}' in current scope`);
 				}
 			},
 			set(target, prop, value) {
@@ -233,9 +249,4 @@ export function observeArrayObject(obj, parent/*, deep*/)
 		proxyMap.set(obj, proxy);
 	}
 	return proxy;
-}
-
-export function isObserved(obj)
-{
-	return isObject(obj) && obj[IS_PROXY];
 }

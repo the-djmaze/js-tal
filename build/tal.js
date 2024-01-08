@@ -55,6 +55,11 @@
 
 	class TalError extends Error {}
 
+	function isObserved(obj)
+	{
+		return isObject(obj) && obj[IS_PROXY];
+	}
+
 	let detectingObservables;
 	const
 		detectObservables = () => {
@@ -125,6 +130,14 @@
 								getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
 								Object.defineProperty(obj, name, { get: fn });
 							};
+						/**
+						 * TAL built-in Names
+						 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
+						 */
+						case "root":
+							return parent ? parent[prop] : proxy;
+						case "context":
+							return proxy;
 					}
 					if (Reflect.has(target, prop)) {
 						if (detectingObservables) {
@@ -139,9 +152,8 @@
 					if (typeof prop !== 'symbol') {
 						if (parent) {
 							return parent[prop];
-						} else {
-							console.error(`Undefined property '${prop}' in current scope`);
 						}
+						console.error(`Undefined property '${prop}' in current scope`);
 					}
 				},
 				set(target, prop, value, receiver) {
@@ -155,6 +167,8 @@
 						case "clearObservers":
 						case "refreshObservers":
 						case "defineComputed":
+						case "root":
+						case "context":
 							throw new TalError(`${prop} can't be initialized, it is internal`);
 
 					}
@@ -190,26 +204,34 @@
 				get(target, prop, receiver) {
 					switch (prop)
 					{
-					case IS_PROXY: return 1;
-					// Vue watch(), Knockout subscribe()
-					case "observe":
-	//					callback(obj[property], property);
-						// fallthrough
-					case "unobserve":
-	//					return (property, callback) => observers[prop](property, callback);
-						return observers[prop].bind(observers);
-					case "clearObservers":
-						return () => observers.clear();
-					case "refreshObservers":
-						return () => observers.dispatchAll(obj);
-					// Vue computed(), Knockout computed()
-					case "defineComputed":
-						return (name, fn) => {
-							detectObservables();
-							fn();
-							getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
-							Object.defineProperty(obj, name, { get: fn });
-						};
+						case IS_PROXY: return 1;
+						// Vue watch(), Knockout subscribe()
+						case "observe":
+	//						callback(obj[property], property);
+							// fallthrough
+						case "unobserve":
+	//						return (property, callback) => observers[prop](property, callback);
+							return observers[prop].bind(observers);
+						case "clearObservers":
+							return () => observers.clear();
+						case "refreshObservers":
+							return () => observers.dispatchAll(obj);
+						// Vue computed(), Knockout computed()
+						case "defineComputed":
+							return (name, fn) => {
+								detectObservables();
+								fn();
+								getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
+								Object.defineProperty(obj, name, { get: fn });
+							};
+						/**
+						* TAL built-in Names
+						* https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
+						*/
+						case "root":
+							return parent ? parent[prop] : proxy;
+						case "context":
+							return proxy;
 					}
 					if (Reflect.has(target, prop)) {
 						switch (prop)
@@ -260,9 +282,8 @@
 					if (typeof prop !== 'symbol') {
 						if (parent) {
 							return parent[prop];
-						} else {
-							console.error(`Undefined property '${prop}' in current scope`);
 						}
+						console.error(`Undefined property '${prop}' in current scope`);
 					}
 				},
 				set(target, prop, value) {
@@ -288,11 +309,6 @@
 			proxyMap.set(obj, proxy);
 		}
 		return proxy;
-	}
-
-	function isObserved(obj)
-	{
-		return isObject(obj) && obj[IS_PROXY];
 	}
 
 	/**
@@ -346,9 +362,9 @@
 				}
 				let fn = context[match[l]];
 				if (!isFunction(fn)) {
-					fn = (writer ? value => context[match[l]] = value : () => context[match[l]]).bind(context);
+					fn = (writer ? value => context[match[l]] = value : () => context[match[l]]);
 				}
-				return fn;
+				return fn.bind(context);
 			}
 		}
 
@@ -359,6 +375,62 @@
 				return () => expr(context);
 			}
 		}
+	}
+
+	function observePrimitive(prim, parent/*, deep*/)
+	{
+		if (prim[IS_PROXY]) {
+			return prim;
+		}
+
+		if (!['string','number','boolean','bigint'].includes(typeof prim)
+	//	 	&& null !== prim
+	//	 	&& undefined !== prim
+	//	 	&& !(prim instanceof String)
+	//		&& !(prim instanceof Number)
+	//		&& !(prim instanceof Boolean)
+	//		&& !(prim instanceof BigInt)
+		) {
+			throw new TalError("Not a primitive");
+		}
+
+		if (!parent || !parent[IS_PROXY]) {
+			parent = undefined;
+		}
+
+		const obj = nullObject();
+		obj.value = prim;
+
+		const proxy = new Proxy(obj, {
+			get(target, prop) {
+				switch (prop)
+				{
+					case IS_PROXY: return 1;
+					/**
+					* TAL built-in Names
+					* https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
+					*/
+					case "root":
+						return parent ? parent[prop] : proxy;
+					case "context":
+						return proxy;
+				}
+				const prim = Reflect.get(target, 'value');
+				const value = prim[prop];
+				if (null != value) {
+					return isFunction(value) ? value.bind(prim) : value;
+				}
+				if (typeof prop !== 'symbol') {
+					if (parent) {
+						return parent[prop];
+					}
+					console.error(`Undefined property '${prop}' in current scope`);
+				}
+
+			}
+		});
+
+		return proxy;
 	}
 
 	/**
@@ -487,6 +559,7 @@
 
 		/**
 		 * tal:define - define variables.
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#define-define-variables
 		 */
 		static define(el, expression, context) {
 			expression.split(";").forEach(def => {
@@ -509,6 +582,7 @@
 
 		/**
 		 * tal:condition - test conditions.
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#condition-conditionally-insert-or-remove-an-element
 		 */
 		static condition(el, expression, context, parser) {
 			let tree = el.cloneNode(true),
@@ -535,6 +609,7 @@
 
 		/**
 		 * tal:repeat - repeat an element.
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#repeat-repeat-an-element
 		 * This is very complex as it creates a deeper context
 		 * Especially when there"s a repeat inside a repeat, like:
 		 * <div tal:repeat="item context/cart">
@@ -553,9 +628,18 @@
 				array = context[match[2]],
 				target = el.ownerDocument.createTextNode(""),
 				createItem = value => {
-					let node = el.cloneNode(true);
-					let subContext = observeObject(nullObject(), context);
-					subContext.defineComputed(match[1], () => value);
+					let node = el.cloneNode(true), subContext;
+					try {
+						value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
+					} catch (e) {
+						console.error(e);
+					}
+					if ('context' == match[1] && isObserved(value)) {
+						subContext = value;
+					} else {
+						subContext = observeObject(nullObject(), context);
+						subContext[match[1]] = value;
+					}
 					parser(node, subContext);
 					return node;
 				};
@@ -648,7 +732,10 @@
 	/*
 		tal:switch - define a switch condition
 		tal:case - include element only if expression is equal to parent switch
-		tal:on-error - handle errors.
+
+		static ["on-error"](el, expression, context) {
+			Statements.content(el, expression, context);
+		}
 	*/
 
 		/**
@@ -656,28 +743,25 @@
 		 * like: HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement, HTMLDetailsElement
 		 */
 		static listen(el, value, context) {
-	//		value.matchAll(/([^\s;]+)\s+([^;]+)/);
-			value.split(";").forEach(attr => {
-				if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
-					if (!Tales.string(attr[2]) && el instanceof HTMLElement) {
+			if (el.addEventListener) {
+	//			value.matchAll(/([^\s;]+)\s+([^;]+)/);
+				value.split(";").forEach(attr => {
+					if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
 						const setter = Tales.path(attr[2], context, true);
 						if (setter) {
 							if ("value" === attr[1] || "checked" === attr[1]) {
 								el.addEventListener("change", () => setter(el[attr[1]]));
-							}
-							if ("input" === attr[1]) {
+							} else if ("input" === attr[1]) {
 								el.addEventListener(attr[1], () => setter(el.value));
-							}
-							if ("toggle" === attr[1]) {
+							} else if ("toggle" === attr[1]) {
 								el.addEventListener(attr[1], event => setter(event.newState));
-							}
-							if ("click" === attr[1]) {
+							} else {
 								el.addEventListener(attr[1], setter);
 							}
 						}
 					}
-				}
-			});
+				});
+			}
 		}
 	}
 
@@ -720,19 +804,31 @@
 				Statements.define(el, value, context);
 			}
 
-			// Same as KnockoutJS if:
+	/*
+			let value = popAttribute(el, "tal:switch");
+			if (null != value) {
+				Statements.switch(el, value, context);
+			}
+	*/
+
 			value = popAttribute(el, "tal:condition");
 			if (null != value) {
 				Statements.condition(el, value, context, parse);
 			}
 
-			// Same as KnockoutJS foreach:
 			value = popAttribute(el, "tal:repeat");
 			if (null != value) {
 				repeat = Statements.repeat(el, value, context, parse);
 				repeaters.push(repeat);
 				return;
 			}
+
+	/*
+			let value = popAttribute(el, "tal:case");
+			if (null != value) {
+				Statements.case(el, value, context);
+			}
+	*/
 
 			value = popAttribute(el, "tal:content");
 			let skip = false;
@@ -742,8 +838,8 @@
 				Statements.replace(el, value, context);
 				skip = true;
 			}
+
 			if (!skip) {
-				// Same as KnockoutJS attr:
 				value = popAttribute(el, "tal:attributes");
 				if (null != value) {
 					Statements.attributes(el, value, context);
@@ -759,6 +855,14 @@
 					Statements.listen(el, value, context);
 				}
 			}
+
+	/*
+			https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#on-error-handle-errors
+			let value = popAttribute(el, "tal:on-error");
+			if (null != value) {
+				Statements["on-error"](el, value, context);
+			}
+	*/
 
 			el.getAttributeNames().forEach(name => name.startsWith("tal:") && el.removeAttribute(name));
 		});

@@ -1,5 +1,5 @@
-import { observeObject, isObserved } from 'observers/object';
-import { isFunction, TalError } from 'common';
+import { observeObject } from 'observers/object';
+import { isFunction, isObserved, TalError } from 'common';
 
 /**
  * This can be very complex, like:
@@ -52,9 +52,9 @@ export class Tales
 			}
 			let fn = context[match[l]];
 			if (!isFunction(fn)) {
-				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]).bind(context);
+				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]);
 			}
-			return fn;
+			return fn.bind(context);
 		}
 	}
 

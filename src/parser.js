@@ -1,6 +1,5 @@
-import { isObserved } from 'observers/object';
 import { Statements } from 'statements';
-import { popAttribute, TalError } from 'common';
+import { popAttribute, isObserved, TalError } from 'common';
 
 // context = observeObject(obj)
 // TalContext
@@ -37,19 +36,31 @@ export function parse(template, context)
 			Statements.define(el, value, context);
 		}
 
-		// Same as KnockoutJS if:
+/*
+		let value = popAttribute(el, "tal:switch");
+		if (null != value) {
+			Statements.switch(el, value, context);
+		}
+*/
+
 		value = popAttribute(el, "tal:condition");
 		if (null != value) {
 			Statements.condition(el, value, context, parse);
 		}
 
-		// Same as KnockoutJS foreach:
 		value = popAttribute(el, "tal:repeat");
 		if (null != value) {
 			repeat = Statements.repeat(el, value, context, parse);
 			repeaters.push(repeat);
 			return;
 		}
+
+/*
+		let value = popAttribute(el, "tal:case");
+		if (null != value) {
+			Statements.case(el, value, context);
+		}
+*/
 
 		value = popAttribute(el, "tal:content");
 		let skip = false;
@@ -59,8 +70,8 @@ export function parse(template, context)
 			Statements.replace(el, value, context);
 			skip = true;
 		}
+
 		if (!skip) {
-			// Same as KnockoutJS attr:
 			value = popAttribute(el, "tal:attributes");
 			if (null != value) {
 				Statements.attributes(el, value, context);
@@ -76,6 +87,14 @@ export function parse(template, context)
 				Statements.listen(el, value, context);
 			}
 		}
+
+/*
+		https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#on-error-handle-errors
+		let value = popAttribute(el, "tal:on-error");
+		if (null != value) {
+			Statements["on-error"](el, value, context);
+		}
+*/
 
 		el.getAttributeNames().forEach(name => name.startsWith("tal:") && el.removeAttribute(name));
 	});
