@@ -22,9 +22,9 @@ const
 		}
 	},
 	resolveTales = (context, expression) => {
-		let fn = Tales.js(context, expression);
+		let fn = Tales.js(expression, context);
 		if (!fn) {
-			fn = Tales.path(context, expression);
+			fn = Tales.path(expression, context);
 			if (!fn) {
 				console.error(`Path '${expression}' not found`, context);
 			}
@@ -295,7 +295,7 @@ export class Statements
 		value.split(";").forEach(attr => {
 			if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
 				if (!Tales.string(attr[2]) && el instanceof HTMLElement) {
-					const setter = Tales.path(context, attr[2], true);
+					const setter = Tales.path(attr[2], context, true);
 					if (setter) {
 						if ("value" === attr[1] || "checked" === attr[1]) {
 							el.addEventListener("change", () => setter(el[attr[1]]));

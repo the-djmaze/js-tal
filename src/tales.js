@@ -27,7 +27,7 @@ export class Tales
 			: null;
 	}
 
-	static path(context, expr, writer) {
+	static path(expr, context, writer) {
 		let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
 		if (match) {
 			if (!isObserved(context)) {
@@ -58,7 +58,7 @@ export class Tales
 		}
 	}
 
-	static js(context, expr) {
+	static js(expr, context) {
 		expr = expr.trim().match(/^(?:js:)(.*)$/);
 		if (expr) {
 			return new Function("$context", `with($context){return ${expr[1]}}`);
