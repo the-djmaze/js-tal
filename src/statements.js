@@ -29,7 +29,7 @@ const
 				console.error(`Path '${expression}' not found`, context);
 			}
 		}
-		return fn?.bind(context);
+		return fn;
 	},
 	processDetectedObservables = (el, fn) =>
 		getDetectedObservables().forEach(([obj, prop]) =>

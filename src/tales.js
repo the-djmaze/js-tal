@@ -52,7 +52,7 @@ export class Tales
 			}
 			let fn = context[match[l]];
 			if (!isFunction(fn)) {
-				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]);
+				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]).bind(context);
 			}
 			return fn;
 		}
