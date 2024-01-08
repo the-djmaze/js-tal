@@ -175,7 +175,7 @@ export function observeArrayObject(obj/*, deep*/)
 						observers.dispatch(prop, value);
 					} else if (isFinite(prop)) {
 						value = observeObject(value);
-						observers.dispatch('set', {index:prop, value});
+						observers.dispatch("set", {index:prop, value});
 					}
 					target[prop] = value;
 				}

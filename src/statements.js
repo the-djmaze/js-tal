@@ -16,13 +16,17 @@ export class Statements
 			if (null == text) {
 				let path = Tales.path(context, attr[2]);
 				if (path) {
-					path[0].observe(path[1], value => {
-						el.setAttribute(attr[1], value);
-						el[attr[1]] = value;
-					});
 					text = path[0][path[1]];
+					if (isFunction(text)) {
+						text = text();
+					} else {
+						path[0].observe(path[1], value => {
+							el.setAttribute(attr[1], value);
+							el[attr[1]] = value;
+						});
+					}
 				} else {
-					console.error('Path not found', {value, context});
+					console.error(`Path '${value}' not found`, context);
 				}
 			}
 			el.setAttribute(attr[1], text);
@@ -34,17 +38,21 @@ export class Statements
 	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#content-replace-the-content-of-an-element
 	 */
 	static content(el, value, context) {
-		value = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/);
-		let expression = value[2],
+		let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
+			expression = match[2],
 			text = Tales.string(expression),
-			mode = "structure" === value[1] ? "innerHTML" : "textContent";
+			mode = "structure" === match[1] ? "innerHTML" : "textContent";
 		if (null == text) {
 			let path = Tales.path(context, expression);
 			if (path) {
-				path[0].observe(path[1], value => el[mode] = value);
 				text = path[0][path[1]];
+				if (isFunction(text)) {
+					text = text();
+				} else {
+					path[0].observe(path[1], value => el[mode] = value);
+				}
 			} else {
-				console.error('Path not found', {value, context});
+				console.error(`Path '${value}' not found`, context);
 			}
 		}
 		el[mode] = text;
@@ -55,43 +63,47 @@ export class Statements
 	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#replace-replace-an-element
 	 */
 	static replace(el, value, context) {
-		value = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/);
-		let expression = value[2],
-			text = Tales.string(expression);
-		if (null != text) {
-			if ("structure" === value[1]) {
-				el.outerHTML = text;
-			} else {
-				el.replaceWith(text);
-			}
+		let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
+			expression = match[2],
+			text = Tales.string(expression),
+			fn;
+		if ("structure" === match[1]) {
+			fn = string => el.outerHTML = string;
 		} else {
-			let fn;
-			if ("structure" === value[1]) {
-				// Because the Element is replaced, it is gone
-				// So we prepend an empty TextNode as reference
-				let node = document.createTextNode(""), frag;
-				el.replaceWith(node);
-				// Now we can put/replace the HTML after the empty TextNode
-				fn = string => {
-					frag && frag.forEach(el => el.remove());
-					const template = document.createElement("template");
-					template.innerHTML = string.trim();
-					frag = Array.from(template.content.childNodes);
-					node.after(template.content);
-				};
-			} else {
-				let node = document.createTextNode("");
-				el.replaceWith(node);
-				fn = string => node.nodeValue = string;
-			}
+			fn = string => el.replaceWith(string);
+		}
+		if (null == text) {
 			let path = Tales.path(context, expression);
 			if (path) {
-				fn(path[0][path[1]]);
-				path[0].observe(path[1], fn);
+				text = path[0][path[1]];
+				if (isFunction(text)) {
+					text = text();
+				} else {
+					if ("structure" === match[1]) {
+						// Because the Element is replaced, it is gone
+						// So we prepend an empty TextNode as reference
+						let node = document.createTextNode(""), frag;
+						el.replaceWith(node);
+						// Now we can put/replace the HTML after the empty TextNode
+						fn = string => {
+							frag && frag.forEach(el => el.remove());
+							const template = document.createElement("template");
+							template.innerHTML = string.trim();
+							frag = Array.from(template.content.childNodes);
+							node.after(template.content);
+						};
+					} else {
+						let node = document.createTextNode("");
+						el.replaceWith(node);
+						fn = string => node.nodeValue = string;
+					}
+					path[0].observe(path[1], fn);
+				}
 			} else {
-				console.error('Path not found', {value, context});
+				console.error(`Path '${value}' not found`, context);
 			}
 		}
+		fn(text);
 	}
 
 	/**
@@ -114,23 +126,27 @@ export class Statements
 	 * tal:condition - test conditions.
 	 */
 	static condition(el, expression, context, parser) {
-		let tree = el.cloneNode(true);
-		let text = Tales.string(expression);
-		let fn = value => {
-			el.textContent = "";
-			if (value) {
-				let node = tree.cloneNode(true);
-				parser(node, context);
-				el.append(...node.childNodes);
-			}
-		};
+		let tree = el.cloneNode(true),
+			text = Tales.string(expression),
+			fn = value => {
+				el.textContent = "";
+				if (value) {
+					let node = tree.cloneNode(true);
+					parser(node, context);
+					el.append(...node.childNodes);
+				}
+			};
 		if (null == text) {
 			let path = Tales.path(context, expression);
 			if (path) {
-				path[0].observe(path[1], fn);
 				text = path[0][path[1]];
+				if (isFunction(text)) {
+					text = text();
+				} else {
+					path[0].observe(path[1], fn);
+				}
 			} else {
-				console.error('Path not found', {expression, context});
+				console.error(`Path '${expression}' not found`, context);
 			}
 		}
 		fn(text);
@@ -247,8 +263,11 @@ export class Statements
 			let path = Tales.path(context, expression);
 			if (path) {
 				expression = path[0][path[1]];
+				if (isFunction(expression)) {
+					expression = expression();
+				}
 			} else {
-				expression = context[expression];
+				console.error(`Path '${expression}' not found`, context);
 			}
 		} else {
 			expression = true;

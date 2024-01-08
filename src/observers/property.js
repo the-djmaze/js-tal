@@ -6,7 +6,7 @@ export function observeProperty(obj, prop, callback) {
 		const observers = new Observers;
 		obj.observeProperty = (prop, callback) => {
 			if (Object.getOwnPropertyDescriptor(obj, prop)) {
-				console.error('Already observing ' + obj.constructor.name + '.' + prop);
+				console.error(`Already observing ${obj.constructor.name}.${prop}`);
 			} else {
 				const nativeDescriptor = Object.getOwnPropertyDescriptor(obj.constructor.prototype, prop);
 				const setValue = val => {

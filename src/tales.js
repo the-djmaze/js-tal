@@ -33,7 +33,7 @@ export class Tales
 			if (!isObserved(context)) {
 				throw new TalError(`context '${expr}' can't be observed`);
 			}
-			expr = expr[1].trim().split('/');
+			expr = expr[1].trim().split("/");
 			let i = 0, l = expr.length - 1;
 			for (; i < l; ++i) {
 				if (!(expr[i] in context)) {

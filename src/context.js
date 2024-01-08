@@ -20,12 +20,12 @@ export class CONTEXTS
 
 export class TalContext
 {
-	constructor(parent = null/*, scope = 'root'*/)
+	constructor(parent = null/*, scope = "root"*/)
 	{
 		let context = parent ? null : new CONTEXTS(this);
 		return new Proxy(this, {
 			get: (target, prop, receiver) => {
-				if ('CONTEXTS' === prop) {
+				if ("CONTEXTS" === prop) {
 					return context || parent.CONTEXTS;
 				}
 				if (prop in target) {
@@ -45,7 +45,7 @@ export class TalContext
 			}
 //			,apply: (target, thisArg, argList) => {}
 //			,ownKeys: target => Reflect.ownKeys(target)
-//			,has: (target, key) => key[0] !== '_' && key in target
+//			,has: (target, key) => key[0] !== "_" && key in target
 		});
 	}
 }

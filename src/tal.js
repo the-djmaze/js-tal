@@ -23,7 +23,7 @@ class computedProperty
 			scheduler: () => {
 				if (!this._dirty) {
 					this._dirty = true;
-					trigger(toRaw(this), "set", 'value');
+					trigger(toRaw(this), "set", "value");
 				}
 			}
 		});
@@ -34,7 +34,7 @@ class computedProperty
 			self._value = this.effect();
 			self._dirty = false;
 		}
-		track(self, "get", 'value');
+		track(self, "get", "value");
 		return self._value;
 	}
 	set value(newValue) {
