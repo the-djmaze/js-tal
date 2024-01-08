@@ -16,6 +16,9 @@ export function parse(template, context)
 		throw new TalError("context is not observed");
 	}
 //	context = observeObject(context);
+
+	parse.converters.forEach(fn => fn(template, context));
+
 	// elements is a static (not live) NodeList
 	// template root node must be prepended as well
 	let elements = [template, ...template.querySelectorAll(Statements.cssQuery)];
@@ -79,3 +82,8 @@ export function parse(template, context)
 
 	return context;
 }
+
+parse.converters = [
+	// Convert KnockoutJS data-bind
+// 	koConvertBindings
+];

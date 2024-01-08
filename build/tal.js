@@ -321,7 +321,7 @@
 				: null;
 		}
 
-		static path(context, expr, writer) {
+		static path(expr, context, writer) {
 			let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
 			if (match) {
 				if (!isObserved(context)) {
@@ -352,10 +352,11 @@
 			}
 		}
 
-		static js(context, expr) {
+		static js(expr, context) {
 			expr = expr.trim().match(/^(?:js:)(.*)$/);
 			if (expr) {
-				return new Function("$context", `with($context){return ${expr[1]}}`);
+				expr = new Function("$context", `with($context){return ${expr[1]}}`);
+				return () => expr(context);
 			}
 		}
 	}
@@ -379,10 +380,10 @@
 				node.remove();
 			}
 		},
-		resolveTales = (context, expression) => {
-			let fn = Tales.js(context, expression);
+		resolveTales = (expression, context) => {
+			let fn = Tales.js(expression, context);
 			if (!fn) {
-				fn = Tales.path(context, expression);
+				fn = Tales.path(expression, context);
 				if (!fn) {
 					console.error(`Path '${expression}' not found`, context);
 				}
@@ -406,7 +407,7 @@
 				attr = attr.trim().match(/^([^\s]+)\s+(.+)$/);
 				let text = Tales.string(attr[2]);
 				if (null == text) {
-					let getter = resolveTales(context, attr[2]);
+					let getter = resolveTales(attr[2], context);
 					if (getter) {
 						detectObservables();
 						text = getter(context);
@@ -431,11 +432,11 @@
 				text = Tales.string(expression),
 				mode = "structure" === match[1] ? "innerHTML" : "textContent";
 			if (null == text) {
-				let getter = resolveTales(context, expression);
+				let getter = resolveTales(expression, context);
 				if (getter) {
 					detectObservables();
 					text = getter(context);
-					processDetectedObservables(el, () => el[mode] = getter());
+					processDetectedObservables(el, () => el[mode] = getter(context));
 				}
 			}
 			el[mode] = text;
@@ -456,7 +457,7 @@
 				fn = string => el.replaceWith(string);
 			}
 			if (null == text) {
-				let getter = resolveTales(context, expression);
+				let getter = resolveTales(expression, context);
 				if (getter) {
 					if ("structure" === match[1]) {
 						// Because the Element is replaced, it is gone
@@ -490,12 +491,18 @@
 		static define(el, expression, context) {
 			expression.split(";").forEach(def => {
 				def = def.trim().match(/^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/);
-				def[3] = Tales.string(def[3]) || def[3];
+				let text = Tales.string(def[3]);
+				if (null == text) {
+					let getter = resolveTales(expression, context);
+					if (getter) {
+						text = getter(context);
+					}
+				}
 				if ("global" === def[1]) {
 					// TODO: get root context
-					context[def[2]] = def[3];
+					context[def[2]] = text;
 				} else {
-					context[def[2]] = def[3];
+					context[def[2]] = text;
 				}
 			});
 		}
@@ -516,7 +523,7 @@
 					}
 				};
 			if (null == text) {
-				let getter = resolveTales(context, expression);
+				let getter = resolveTales(expression, context);
 				if (getter) {
 					detectObservables();
 					text = getter(context);
@@ -624,7 +631,7 @@
 		 */
 		static ["omit-tag"](el, expression, context) {
 			if (expression) {
-				let getter = resolveTales(context, expression);
+				let getter = resolveTales(expression, context);
 				if (getter) {
 	//				detectObservables();
 					expression = getter(context);
@@ -653,7 +660,7 @@
 			value.split(";").forEach(attr => {
 				if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
 					if (!Tales.string(attr[2]) && el instanceof HTMLElement) {
-						const setter = Tales.path(context, attr[2], true);
+						const setter = Tales.path(attr[2], context, true);
 						if (setter) {
 							if ("value" === attr[1] || "checked" === attr[1]) {
 								el.addEventListener("change", () => setter(el[attr[1]]));
@@ -692,6 +699,9 @@
 			throw new TalError("context is not observed");
 		}
 	//	context = observeObject(context);
+
+		parse.converters.forEach(fn => fn(template, context));
+
 		// elements is a static (not live) NodeList
 		// template root node must be prepended as well
 		let elements = [template, ...template.querySelectorAll(Statements.cssQuery)];
@@ -756,38 +766,10 @@
 		return context;
 	}
 
-	//import { observeDOMNode } from 'observers/dom';
-
-	function observeProperty(obj, prop, callback) {
-		if (!obj.observeProperty) {
-			const observers = new Observers;
-			obj.observeProperty = (prop, callback) => {
-				if (Object.getOwnPropertyDescriptor(obj, prop)) {
-					console.error(`Already observing ${obj.constructor.name}.${prop}`);
-				} else {
-					const nativeDescriptor = Object.getOwnPropertyDescriptor(obj.constructor.prototype, prop);
-					const setValue = val => {
-							let oldVal = nativeDescriptor.get.call(obj);
-	//							result = Reflect.set(obj, prop, val);
-							nativeDescriptor.set.call(obj, val);
-							val = nativeDescriptor.get.call(obj);
-							if (oldVal !== val) {
-								observers.dispatch(prop, nativeDescriptor.get.call(obj));
-							}
-							return true;
-						};
-					Object.defineProperty(obj, prop, {
-						enumerable: nativeDescriptor.enumerable,
-						set: setValue,
-						get: () => nativeDescriptor.get.call(obj)
-					});
-				}
-				observers.add(prop, callback);
-			};
-		}
-
-		obj.observeProperty(prop, callback);
-	}
+	parse.converters = [
+		// Convert KnockoutJS data-bind
+	// 	koConvertBindings
+	];
 
 	/*
 	 * When one of the properties inside the getter function is changed
@@ -837,8 +819,9 @@
 	window.TAL = {
 		parse,
 		observeObject,
-		observeProperty,
-		TalError
+	//	observeProperty,
+		TalError,
+		TALES: Tales
 	};
 
 })();
