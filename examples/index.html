@@ -8,53 +8,66 @@
 </head>
 <body>
 
-<button id="toggleCondition">toggle condition true/false</button>
+<button tal:listen="click toggleCondition">toggle condition true/false</button>
 <div id="tal-condition" tal:condition="foobar">
 	<div id="tal-define" tal:define="variable_name 'foobar'">
 		<ul>
-			<li><b tal:content="'tal-repeat Array or Set'">tal-repeat</b></li>
+			<li><b>tal-repeat Array or Set</b>
+				<br/>
+				<button tal:listen="click pushListItem">push(time)</button>
+				<button tal:listen="click popListItem">item = pop()</button>
+				<button tal:listen="click unshiftListItem">unshift(time)</button>
+				<button tal:listen="click shiftListItem">item = shift()</button>
+				<button tal:listen="click spliceListItem">splice(1,1,'spliced')</button>
+			</li>
 			<li class="tal-repeat" tal:repeat="item list" tal:content="item">this content is replaced</li>
-			<li>
-				<button id="pushListItem">push(time)</button>
-				<button id="popListItem">item = pop()</button>
-				<button id="unshiftListItem">unshift(time)</button>
-				<button id="shiftListItem">item = shift()</button>
-				<button id="spliceListItem">splice(1,1,'spliced')</button>
+			<li class="tal-repeat" tal:repeat="item list">
+				<b tal:content="item">this content is replaced</b>
 			</li>
 		</ul>
 
 		<ul>
-			<li><b tal:content="'tal-repeat Array of objects'">tal-repeat</b></li>
+			<li><b>tal-repeat Array of objects</b>
+				<br/>
+				<button tal:listen="click pushList2Item">push(time)</button>
+				<button tal:listen="click popList2Item">item = pop()</button>
+				<button tal:listen="click unshiftList2Item">unshift(time)</button>
+				<button tal:listen="click shiftList2Item">item = shift()</button>
+				<button tal:listen="click spliceList2Item">splice(1,1,'spliced')</button>
+			</li>
 			<li class="tal-repeat" tal:repeat="item list2" tal:content="item/name">this content is replaced</li>
-			<li>
-				<button id="pushList2Item">push(time)</button>
-				<button id="popList2Item">item = pop()</button>
-				<button id="unshiftList2Item">unshift(time)</button>
-				<button id="shiftList2Item">item = shift()</button>
-				<button id="spliceList2Item">splice(1,1,'spliced')</button>
+			<li class="tal-repeat" tal:repeat="item list2">
+				<b tal:content="item/id">this content is replaced</b>
+				<var tal:replace="item/name">this content is replaced</var>
 			</li>
 		</ul>
 
 		<input id="tal-attributes" tal:attributes="value name; type 'text'" tal:listen="value name"/>
-		<button id="toggleName">value = time</button>
-		<button id="toggleListItem">list[0] = name</button>
+		<button tal:listen="click toggleName">value = time</button>
+		<button tal:listen="click toggleListItem">list[0] = name</button>
 		<br/>
 		<var tal:content="nameIs"></var>
 		<br/>
+		<var tal:content="name"></var>
 
+		<hr/>
 		<input id="tal-attributes" tal:attributes="value nameLive; type 'text'" tal:listen="input nameLive"/>
 		<br/>
 		<var tal:content="nameLive"></var>
+		<br/>
+		<var tal:content="nameLiveIs"></var>
 
 		<hr/>
-		<div id="tal-omit-tag" tal:omit-tag=""></div>
+		<div id="tal-omit-tag" tal:omit-tag="">omit-tag</div>
+		<div id="tal-omit-tag" tal:omit-tag="omit">don't omit-tag</div>
 
+		<hr/>
 		<div id="tal-replace" tal:replace="'replaced div'"></div>
 		<div id="tal-content" tal:content="variable_name"></div>
 
 		<div id="tal-replace" tal:replace="structure html"></div>
 		<div id="tal-content" tal:content="structure html"></div>
-		<button id="setHTML">setHTML</button>
+		<button tal:listen="click setHTML">setHTML</button>
 	</div>
 
 	<hr/>
@@ -66,11 +79,15 @@
 
 	<hr/>
 	<var tal:content="subtree/foo"></var>
-	<button id="setSubtree">setSubtree</button>
+	<button tal:listen="click setSubtree">setSubtree</button>
+
+	<hr/>
+	<b tal:content="'tal-content string'">tal-content</b>
 </div>
 
 <script>
 const context = TAL.observeObject({
+	omit: false,
 	foobar: true,
 	list: [
 		'item 1',
@@ -86,34 +103,31 @@ const context = TAL.observeObject({
 	html: '<div>test</div>',
 	subtree: {
 		foo: 'subtree/foo'
-	}
+	},
+
+	toggleCondition:  () => context.foobar = !context.foobar,
+	toggleName:       () => context.name = Date.now(),
+	toggleListItem:   () => context.list[0] = document.getElementById('tal-attributes').value,
+	pushListItem:     () => context.list.push(Date.now()),
+	unshiftListItem:  () => context.list.unshift(Date.now()),
+	shiftListItem:    () => context.list.shift(),
+	popListItem:      () => context.list.pop(),
+	spliceListItem:   () => context.list.splice(1,1,'spliced'),
+	pushList2Item:    () => context.list2.push({id:Date.now(), name:'push '+Date.now()}),
+	unshiftList2Item: () => context.list2.unshift({id:Date.now(), name:'unshift '+Date.now()}),
+	shiftList2Item:   () => context.list2.shift(),
+	popList2Item:     () => context.list2.pop(),
+	spliceList2Item:  () => context.list2.splice(1,1,{id:Date.now(), name:'spliced '+Date.now()}),
+	setHTML:          () => context.html = '<div>'+Date.now()+'</div>',
+	setSubtree:       () => context.subtree.foo = 'subtree.foo = ' + Date.now()
 });
 context.defineComputed('nameIs', ()=>'name = '+context.name, ['name']);
+context.defineComputed('nameLiveIs', ()=>'name = '+context.nameLive, ['nameLive']);
 context.defineComputed('details', ()=>'open' == context.toggle);
 
 const obj = TAL.parse(document.body, context);
 
 context.refreshObservers();
-
-document.getElementById('toggleCondition').addEventListener('click', ()=>obj.foobar = !obj.foobar);
-document.getElementById('toggleName').addEventListener('click', ()=>obj.name = Date.now());
-document.getElementById('toggleListItem').addEventListener('click', ()=>obj.list[0] = document.getElementById('tal-attributes').value);
-
-document.getElementById('pushListItem').addEventListener('click', ()=>obj.list.push(Date.now()));
-document.getElementById('unshiftListItem').addEventListener('click', ()=>obj.list.unshift(Date.now()));
-document.getElementById('shiftListItem').addEventListener('click', ()=>obj.list.shift());
-document.getElementById('popListItem').addEventListener('click', ()=>obj.list.pop());
-document.getElementById('spliceListItem').addEventListener('click', ()=>obj.list.splice(1,1,'spliced'));
-
-document.getElementById('pushList2Item').addEventListener('click', ()=>obj.list2.push({id:Date.now(), name:'push '+Date.now()}));
-document.getElementById('unshiftList2Item').addEventListener('click', ()=>obj.list2.unshift({id:Date.now(), name:'unshift '+Date.now()}));
-document.getElementById('shiftList2Item').addEventListener('click', ()=>obj.list2.shift());
-document.getElementById('popList2Item').addEventListener('click', ()=>obj.list2.pop());
-document.getElementById('spliceList2Item').addEventListener('click', ()=>obj.list2.splice(1,1,{id:Date.now(), name:'spliced '+Date.now()}));
-
-document.getElementById('setHTML').addEventListener('click', ()=>obj.html = '<div>'+Date.now()+'</div>');
-
-document.getElementById('setSubtree').addEventListener('click', ()=>obj.subtree.foo = 'subtree.foo = ' + Date.now());
 </script>
 </body>
 </html>

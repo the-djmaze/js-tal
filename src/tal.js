@@ -1,6 +1,7 @@
 import { parse } from 'parser';
 import { observeObject } from 'observers/object';
 import { observeProperty } from 'observers/property';
+import { TalError } from 'common';
 
 /*
  * When one of the properties inside the getter function is changed
@@ -50,5 +51,6 @@ function defineComputedProperty(obj, prop, fn, observables)
 window.TAL = {
 	parse,
 	observeObject,
-	observeProperty
+	observeProperty,
+	TalError
 };

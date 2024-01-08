@@ -1,52 +1,76 @@
 (function () {
 	'use strict';
 
-	const isFunction = val => typeof val === 'function';
-	const isObject = val => typeof val === 'object';
-	const IS_PROXY = Symbol('proxied');
+	const
+		isFunction = val => typeof val === "function",
+		isObject = val => typeof val === "object",
+		IS_PROXY = Symbol("proxied"),
+		nullObject = () => Object.create(null),
 
-	// Vue trigger
-	function dispatch(callbacks, prop, value)
-	{
-		try {
-			callbacks && callbacks.forEach(cb => cb(value, prop));
-			return true;
-		} catch (e) {
-	console.dir({
-		prop: prop,
-		value: value,
-		callbacks:callbacks
-	});
-			console.error(e);
-			return false;
-		}
-	}
+		// Vue trigger
+		dispatch = (callbacks, prop, value) =>
+		{
+			try {
+				callbacks && callbacks.forEach(cb => cb(value, prop));
+				return true;
+			} catch (e) {
+				console.dir({
+					prop: prop,
+					value: value,
+					callbacks:callbacks
+				});
+				console.error(e);
+				return false;
+			}
+		},
+
+		popAttribute = (el, name) =>
+		{
+			const value = el.getAttribute(name);
+			el.removeAttribute(name);
+			return value;
+		};
 
 	class Observers extends Map {
 
-		add(property, callback) {
+		observe(property, callback) {
 			this.has(property) || this.set(property, new Set);
 			this.get(property).add(callback);
 		}
 
-		remove(property, callback) {
+		unobserve(property, callback) {
 			this.has(property) && this.get(property).delete(callback);
 		}
 
 		dispatch(property, value) {
 			return dispatch(this.get(property), property, value);
 		}
+
+		dispatchAll(obj) {
+			this.forEach((callbacks, prop) => dispatch(callbacks, prop, obj[prop]));
+			// Refresh children, does not work
+	//		Object.values(obj).forEach(value => value && value.refreshObservers && value.refreshObservers());
+		}
 	}
 
+	class TalError extends Error {}
+
 	const proxyMap = new WeakMap();
-	function observeObject(obj/*, deep*/)
+	function observeObject(obj, parent/*, deep*/)
 	{
-		if (!isObject(obj) || obj[IS_PROXY]) {
+		if (Array.isArray(obj)) {
+			return observeArrayObject(obj/*, deep*/);
+		}
+		if (!isObject(obj)) {
+			return obj;
+		}
+		if (obj[IS_PROXY]) {
 			return obj;
 		}
 
 		let proxy = proxyMap.get(obj);
 		if (!proxy) {
+	//		obj[IS_PROXY] = 2;
 	/*
 			// If deep doesn't evaluate to true, only a shallow proxy is created
 			if (deep) {
@@ -63,36 +87,55 @@
 		}
 	*/
 	//		Object.defineProperty(obj, 'isProxy', { get: function(){return this === obj;} });
-			obj[IS_PROXY] = 1;
 			const observers = new Observers;
-			// Vue watch(), Knockout subscribe()
-			obj.observe = (property, callback) => {
-	//			callback(obj[property], property);
-				observers.add(property, callback);
-			};
-			obj.unobserve = (property, callback) => {
-				observers.remove(property, callback);
-			};
-			obj.clearObservers = () => {
-				observers.clear();
-			};
-			obj.refreshObservers = () => {
-				observers.forEach((callbacks, prop) => dispatch(callbacks, prop, obj[prop]));
-				// Refresh children, does not work
-	//			Object.values(obj).forEach(value => value && value.refreshObservers && value.refreshObservers());
-			};
-			// Vue computed(), Knockout computed()
-			obj.defineComputed = function(name, fn, observe) {
-				Object.defineProperty(this, name, { get: fn });
-				observe && observe.forEach(n => this.observe(n, () => observers.dispatch(name, fn())));
-			};
-
 			proxy = new Proxy(obj, {
-				set: (target, property, value, receiver) => {
-					let oldValue = target[property],
-						result = Reflect.set(target, property, value, receiver);
-					if (result && oldValue !== target[property]) {
-						observers.dispatch(property, target[property]);
+				get(target, prop, receiver) {
+					switch (prop)
+					{
+						case IS_PROXY: return 1;
+						// Vue watch(), Knockout subscribe()
+						case "observe":
+	//						callback(obj[property], property);
+							// fallthrough
+						case "unobserve":
+	//						return (property, callback) => observers[prop](property, callback);
+							return observers[prop].bind(observers);
+						case "clearObservers":
+							return () => observers.clear();
+						case "refreshObservers":
+							return () => observers.dispatchAll(obj);
+						// Vue computed(), Knockout computed()
+						case "defineComputed":
+							return (name, fn, observe) => {
+								Object.defineProperty(obj, name, { get: fn });
+								observe && observe.forEach(n => observers.observe(n, () => observers.dispatch(name, fn())));
+							};
+					}
+					if (Reflect.has(target, prop)) {
+						return Reflect.get(target, prop, receiver);
+					}
+					if (parent) {
+						parent[prop];
+					} else {
+						console.error(`Undefined property '${prop}' in current scope`);
+					}
+					return Reflect.get(target, prop, receiver);
+				},
+				set(target, prop, value, receiver) {
+					switch (prop)
+					{
+						case "observe":
+						case "unobserve":
+						case "clearObservers":
+						case "refreshObservers":
+						case "defineComputed":
+							throw new TalError(`${prop} can't be initialized, it is internal`);
+
+					}
+					let oldValue = target[prop],
+						result = Reflect.set(target, prop, value, receiver);
+					if (result && oldValue !== target[prop]) {
+						observers.dispatch(prop, target[prop]);
 					}
 					return result;
 				}
@@ -100,6 +143,109 @@
 			proxyMap.set(obj, proxy);
 		}
 		return proxy;
+	}
+
+	function observeArrayObject(obj/*, deep*/)
+	{
+	//	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
+		if (!Array.isArray(obj)) {
+			throw new TalError("Not an Array");
+		}
+		if (obj[IS_PROXY]) {
+			return obj;
+		}
+		let proxy = proxyMap.get(obj);
+		if (!proxy) {
+	//		obj[IS_PROXY] = 2;
+			obj.forEach((item, index) => obj[index] = observeObject(item));
+
+			const observers = new Observers;
+			proxy = new Proxy(obj, {
+				get(target, prop/*, receiver*/) {
+					switch (prop)
+					{
+					case IS_PROXY: return 1;
+					// Vue watch(), Knockout subscribe()
+					case "observe":
+	//					callback(obj[property], property);
+						// fallthrough
+					case "unobserve":
+	//					return (property, callback) => observers[prop](property, callback);
+						return observers[prop].bind(observers);
+					case "clearObservers":
+						return () => observers.clear();
+					case "refreshObservers":
+						return () => observers.dispatchAll(obj);
+					// Vue computed(), Knockout computed()
+					case "defineComputed":
+						return (name, fn, observe) => {
+							Object.defineProperty(obj, name, { get: fn });
+							observe && observe.forEach(n => observers.observe(n, () => observers.dispatch(name, fn())));
+						};
+					}
+					if (prop in target) {
+						switch (prop)
+						{
+						// Set
+						case "clear":
+							return () => {
+								observers.dispatch(prop);
+								return target.clear();
+							};
+						case "add":
+						case "delete":
+							throw new TalError("Set.prototype."+prop+"() not supported");
+						// Array mutator methods
+						case "copyWithin":
+						case "fill":
+						case "reverse":
+						case "sort":
+							throw new TalError("Array.prototype."+prop+"() not supported");
+						case "shift":
+	//					case "pop":
+							return () => {
+								let value = target[prop]();
+								observers.dispatch(prop, value);
+								return value;
+							};
+						case "unshift":
+						case "splice":
+						case "push":
+							return (...args) => {
+								args = args.map(obj => observeObject(obj));
+								let result = target[prop](...args);
+								observers.dispatch(prop, args);
+								return result;
+							};
+						}
+						return target[prop];
+	//					let value = Reflect.get(target, prop, receiver);
+	//					return isFunction(value) ? value.bind(target) : value;
+					}
+				},
+				set(target, prop, value) {
+					if (target[prop] !== value) {
+						target[prop] = value;
+						if ("length" === prop) {
+							observers.dispatch(prop, value);
+						} else if (isFinite(prop)) {
+							value = observeObject(value);
+							observers.dispatch('set', {index:prop, value});
+						}
+						target[prop] = value;
+					}
+					return true;
+				}
+			});
+
+			proxyMap.set(obj, proxy);
+		}
+		return proxy;
+	}
+
+	function isObserved(obj)
+	{
+		return isObject(obj) && obj[IS_PROXY];
 	}
 
 	/**
@@ -129,17 +275,27 @@
 		}
 
 		static path(context, expr) {
-			expr = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
+			expr = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
 			if (expr) {
+				if (!isObserved(context)) {
+					throw new TalError(`context '${expr}' can't be observed`);
+				}
 				expr = expr[1].trim().split('/');
 				let i = 0, l = expr.length - 1;
-				context = observeObject(context);
 				for (; i < l; ++i) {
 					if (!(expr[i] in context)) {
 						return;
 					}
-					context[expr[i]] = observeObject(context[expr[i]]);
-					context = context[expr[i]];
+					let newContext = context[expr[i]];
+					if (!isObserved(newContext)) {
+						newContext = observeObject(newContext);
+						try {
+							context[expr[i]] = newContext;
+						} catch (e) {
+							console.error(e,{context, prop:expr[i]});
+						}
+					}
+					context = newContext;
 				}
 				return [context, expr[l]];
 			}
@@ -154,19 +310,22 @@
 		 */
 		static attributes(el, value, context) {
 	//		value.matchAll(/([^\s;]+)\s+([^;]+)/);
-			value.split(';').forEach(attr => {
+			value.split(";").forEach(attr => {
 				attr = attr.trim().match(/^([^\s]+)\s+(.+)$/);
 				let text = Tales.string(attr[2]);
-				if (null != text) {
-					el.setAttribute(attr[1], text);
-				} else {
-					// TODO: complex tales
-					context.observe(attr[2], value => {
-						el.setAttribute(attr[1], value);
-						el[attr[1]] = value;
-					});
-					el.setAttribute(attr[1], context[attr[2]]);
+				if (null == text) {
+					let path = Tales.path(context, attr[2]);
+					if (path) {
+						path[0].observe(path[1], value => {
+							el.setAttribute(attr[1], value);
+							el[attr[1]] = value;
+						});
+						text = path[0][path[1]];
+					} else {
+						console.error('Path not found', {value, context});
+					}
 				}
+				el.setAttribute(attr[1], text);
 			});
 		}
 
@@ -178,15 +337,14 @@
 			value = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/);
 			let expression = value[2],
 				text = Tales.string(expression),
-				mode = 'structure' === value[1] ? 'innerHTML' : 'textContent';
+				mode = "structure" === value[1] ? "innerHTML" : "textContent";
 			if (null == text) {
 				let path = Tales.path(context, expression);
 				if (path) {
 					path[0].observe(path[1], value => el[mode] = value);
 					text = path[0][path[1]];
 				} else {
-					context.observe(value[2], value => el[mode] = value);
-					text = context[value[2]];
+					console.error('Path not found', {value, context});
 				}
 			}
 			el[mode] = text;
@@ -200,56 +358,204 @@
 			value = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/);
 			let expression = value[2],
 				text = Tales.string(expression);
-			if ('structure' === value[1]) {
-				if (null == text) {
+			if (null != text) {
+				if ("structure" === value[1]) {
+					el.outerHTML = text;
+				} else {
+					el.replaceWith(text);
+				}
+			} else {
+				let fn;
+				if ("structure" === value[1]) {
 					// Because the Element is replaced, it is gone
 					// So we prepend an empty TextNode as reference
-					let node = document.createTextNode(''), frag;
+					let node = document.createTextNode(""), frag;
 					el.replaceWith(node);
 					// Now we can put/replace the HTML after the empty TextNode
-					const setHTML = string => {
+					fn = string => {
 						frag && frag.forEach(el => el.remove());
-						const template = document.createElement('template');
+						const template = document.createElement("template");
 						template.innerHTML = string.trim();
 						frag = Array.from(template.content.childNodes);
 						node.after(template.content);
 					};
-					setHTML(context[value[2]]);
-					context.observe(value[2], value => setHTML(value));
 				} else {
-					el.outerHTML = text;
+					let node = document.createTextNode("");
+					el.replaceWith(node);
+					fn = string => node.nodeValue = string;
 				}
-			} else if (null == text) {
-				let node = document.createTextNode(context[value[2]]);
-				el.replaceWith(node);
-				context.observe(value[2], value => node.nodeValue = value);
-			} else {
-				el.replaceWith(text);
+				let path = Tales.path(context, expression);
+				if (path) {
+					fn(path[0][path[1]]);
+					path[0].observe(path[1], fn);
+				} else {
+					console.error('Path not found', {value, context});
+				}
 			}
 		}
 
 		/**
 		 * tal:define - define variables.
 		 */
-		static define(/*el, value, context*/) {
+		static define(el, expression, context) {
+			expression.split(";").forEach(def => {
+				def = def.trim().match(/^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/);
+				def[3] = Tales.string(def[3]) || def[3];
+				if ("global" === def[1]) {
+					// TODO: get root context
+					context[def[2]] = def[3];
+				} else {
+					context[def[2]] = def[3];
+				}
+			});
 		}
 
 		/**
 		 * tal:condition - test conditions.
 		 */
-		static condition(/*el, value, context*/) {
+		static condition(el, expression, context, parser) {
+			let tree = el.cloneNode(true);
+			let text = Tales.string(expression);
+			let fn = value => {
+				el.textContent = "";
+				if (value) {
+					let node = tree.cloneNode(true);
+					parser(node, context);
+					el.append(...node.childNodes);
+				}
+			};
+			if (null == text) {
+				let path = Tales.path(context, expression);
+				if (path) {
+					path[0].observe(path[1], fn);
+					text = path[0][path[1]];
+				} else {
+					console.error('Path not found', {expression, context});
+				}
+			}
+			fn(text);
 		}
 
 		/**
 		 * tal:repeat - repeat an element.
+		 * This is very complex as it creates a deeper context
+		 * Especially when there"s a repeat inside a repeat, like:
+		 * <div tal:repeat="item context/cart">
+		 *     <div tal:repeat="prop item/props">
+		 *         <input tal:attributes="name "item[${item/id}][${prop/id}]""/>
+		 *     </div>
+		 * </div>
 		 */
-		static repeat(/*el, value, context*/) {
+		static repeat(el, value, context, parser) {
+			value = value.trim().match(/^([^\s]+)\s+(.+)$/);
+	//		console.dir({value});
+	//		context = TalContext;
+	//		context = observeObject(context[repeater.prop]);
+	//		contextTree.push(context);
+			const items = [],
+				array = context[value[2]],
+				target = el.ownerDocument.createTextNode(""),
+				createItem = context => {
+					let node = el.cloneNode(true);
+					let subContext = observeObject(nullObject());
+	/*
+					try {
+						context = observeObject(context);
+					} catch (err) {
+						console.error(err);
+					}
+	*/
+					subContext.defineComputed(value[1], () => context);
+					parser(node, subContext);
+					return node;
+				};
+			items.name = value[1];
+			items.hasChild = node => el.contains(node);
+			items.add = (value, pos) => {
+				let node = createItem(value);
+				if (isFinite(pos) && pos < items.length) {
+					if (0 == pos) {
+						items[0].before(node);
+						items.unshift(node);
+					} else {
+						items[pos].before(node);
+						items.splice(pos, 0, node);
+					}
+				} else {
+					target.before(node);
+	//				items.length ? items[items.length-1].after(node) : items.parent.insertBefore(node, target);
+					items.push(node);
+				}
+			};
+
+			el.replaceWith(target);
+
+			let observable = observeArrayObject(array);
+			observable.observe("clear", () => {
+				items.forEach(item => item.remove());
+				items.length = 0;
+			});
+			observable.observe("shift", () => {
+				let item = items.shift();
+				item && item.remove();
+			});
+			observable.observe("unshift", (args) => {
+				let i = args.length;
+				while (i--) items.add(args[i], 0);
+	//			args.forEach((item, i) => items.add(item, i));
+			});
+			observable.observe("splice", (args) => {
+				if (0 < args[1]) {
+					let i = Math.min(items.length, args[0] + args[1]);
+					while (args[0] < i--) items[i].remove();
+					items.splice(args[0], args[1]);
+				}
+				for (let i = 2; i < args.length; ++i) {
+					items.add(args[i], args[0]);
+				}
+			});
+			observable.observe("push", (args) => {
+				args.forEach(item => items.add(item));
+			});
+			observable.observe("length", length => {
+				while (items.length > length) items.pop().remove();
+			});
+			observable.observe("set", item => {
+				if (item.index in items) {
+					let node = createItem(item.value);
+					items[item.index].replaceWith(node);
+					items[item.index] = node;
+				} else {
+					items.add(item.value, item.index);
+				}
+			});
+
+			context[value[2]] = observable;
+
+			// Fill the list with current repeat values
+			array.forEach((value, pos) => items.add(value, pos));
+
+			return items;
 		}
 
 		/**
 		 * tal:omit-tag - remove an element, leaving the content of the element.
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#omit-tag-remove-an-element-leaving-its-contents
 		 */
-		static ['omit-tag'](/*el, value, context*/) {
+		static ["omit-tag"](el, expression, context) {
+			if (expression) {
+				let path = Tales.path(context, expression);
+				if (path) {
+					expression = path[0][path[1]];
+				} else {
+					expression = context[expression];
+				}
+			} else {
+				expression = true;
+			}
+			if (expression) {
+				el.replaceWith(...el.childNodes);
+			}
 		}
 
 	/*
@@ -257,275 +563,117 @@
 		tal:case - include element only if expression is equal to parent switch
 		tal:on-error - handle errors.
 	*/
+
+		/**
+		 * tal:listen - Observe native elements using addEventListener for two-way bindings
+		 * like: HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement, HTMLDetailsElement
+		 */
+		static listen(el, value, context) {
+	//		value.matchAll(/([^\s;]+)\s+([^;]+)/);
+			value.split(";").forEach(attr => {
+				if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
+					if (!Tales.string(attr[2]) && el instanceof HTMLElement) {
+						const path = Tales.path(context, attr[2]),
+							ctx = path ? path[0] : context,
+							prop = path ? path[1] : attr[2];
+						if ("value" === attr[1] || "checked" === attr[1]) {
+							el.addEventListener("change", () => ctx[prop] = el[attr[1]]);
+						}
+						if ("input" === attr[1]) {
+							el.addEventListener(attr[1], () => ctx[prop] = el.value);
+						}
+						if ("toggle" === attr[1]) {
+							el.addEventListener(attr[1], event => ctx[prop] = event.newState);
+						}
+						if ("click" === attr[1]) {
+							el.addEventListener(attr[1], event => ctx[prop](event));
+						}
+					}
+				}
+			});
+		}
 	}
 
 	Statements.methods = Object.getOwnPropertyNames(Statements).filter(n => isFunction(Statements[n]));
-	Statements.cssQuery = '[tal\\:' + Statements.methods.join('],[tal\\:') + ']';
-
-	function popAttribute(el, name)
-	{
-		const value = el.getAttribute(name);
-		el.removeAttribute(name);
-		return value;
-	}
+	Statements.cssQuery = "[tal\\:" + Statements.methods.join("],[tal\\:") + "]";
+	//Statements.cssQuery = "[data-tal-" + Statements.methods.join("],[data-tal-") + "]";
 
 	// context = observeObject(obj)
 	// TalContext
-	function parse(template, obj)
+	function parse(template, context)
 	{
-		if (typeof v === 'string') {
+		if (typeof template === "string") {
 			template = document.getElementById(template);
 		}
 		if (!(template instanceof Element)) {
-			throw new Error('template not an instance of Element');
+			throw new TalError("template not an instance of Element");
 		}
-	/*
-		TAL:
-			'define'
-			'condition'  // ko if:
-			'repeat'     // ko foreach:
-			'content'
-			'replace'
-			'attributes' // ko attr:
-			'omit-tag'
-					 // ko template
-	*/
-		let elements = template.querySelectorAll(Statements.cssQuery);
-		if (elements.length) {
-			let context = observeObject(obj),
-				repeat, repeaters = [];
-			elements.forEach(el => {
-				if (repeat && !repeat.node.contains(el)) {
-					repeat = repeaters.pop();
+		if (!isObserved(context)) {
+			throw new TalError("context is not observed");
+		}
+	//	context = observeObject(context);
+		// elements is a static (not live) NodeList
+		// template root node must be prepended as well
+		let elements = [template, ...template.querySelectorAll(Statements.cssQuery)];
+		let repeat, repeaters = [];
+		elements.forEach(el => {
+			if (repeat) {
+				if (repeat.hasChild(el)) {
+					// Skip this element as it is handled by Statements.repeat
+					return;
 				}
+				repeat = repeaters.pop();
+			}
 
-				let value = popAttribute(el, 'tal:define');
-				if (null != value) {
-					value.split(';').forEach(def => {
-						def = def.trim().match(/^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/);
-						def[3] = Tales.string(def[3]) || def[3];
-						if ('global' === def[1]) {
-							// TODO: get root context
-							context[def[2]] = def[3];
-						} else {
-							context[def[2]] = def[3];
-						}
-					});
-				}
+			let value = popAttribute(el, "tal:define");
+			if (null != value) {
+				Statements.define(el, value, context);
+			}
 
-				let expression = popAttribute(el, 'tal:condition');
-				if (null != expression) {
-					context.observe(expression, value => el.hidden = !value);
-				}
+			// Same as KnockoutJS if:
+			value = popAttribute(el, "tal:condition");
+			if (null != value) {
+				Statements.condition(el, value, context, parse);
+			}
 
-				/**
-				 * This is very complex as it creates a deeper context
-				 * Especially when there's a repeat inside a repeat, like:
-				 * <div tal:repeat="item context/cart">
-				 *     <div tal:repeat="prop item/props">
-				 *         <input tal:attributes="name 'item[${item/id}][${prop/id}]'"/>
-				 *     </div>
-				 * </div>
-				 */
-				value = popAttribute(el, 'tal:repeat');
-				if (null != value) {
-					if (null != el.getAttribute('tal:content')) {
-						el.textContent = '';
-					}
-					value = value.trim().match(/^([^\s]+)\s+(.+)$/);
-	//console.dir({value:value});
-	//				context = TalContext;
-	//				context = observeObject(context[repeater.prop]);
-	//				contextTree.push(context);
-					let items = [];
-					items.name = value[1];
-					items.prop = value[2];
-					items.node = el.cloneNode(true);
-					items.end = el;
-					items.add = function(value, pos) {
-						let item = this.node.cloneNode(true);
-						let expression = popAttribute(item, 'tal:content');
-						if (null != expression) {
-							try {
-								value = observeObject(value);
-							} catch (err) {
-								// TODO: observe scalar array item
-								console.error(err);
-							}
-							Statements.content(item, expression, {[this.name]:value});
-						}
-	/*
-						let tal = item.querySelectorAll('[tal\\:define],[tal\\:condition],[tal\\:repeat],[tal\\:content],[tal\\:replace],[tal\\:attributes],[tal\\:omit-tag]');
-						if (tal.length) {
-							tal.forEach(el => {
-								expression = el.getAttribute('tal:content');
-								if (null != expression) {
-									el.textContent = value;
-									el.removeAttribute('tal:content');
-								}
-							});
-						}
-	*/
-						if (isFinite(pos) && pos < this.length) {
-							if (0 == pos) {
-								this[0].before(item);
-								this.unshift(item);
-							} else {
-								this[pos].before(item);
-								this.splice(pos, 0, item);
-							}
-						} else {
-							this.end.before(item);
-	//						this.length ? this[this.length-1].after(item) : this.parent.insertBefore(item, this.end);
-							this.push(item);
-						}
-					};
-					['content','replace','attributes','omit-tag'].forEach(a => el.removeAttribute('tal:'+a));
+			// Same as KnockoutJS foreach:
+			value = popAttribute(el, "tal:repeat");
+			if (null != value) {
+				repeat = Statements.repeat(el, value, context, parse);
+				repeaters.push(repeat);
+				return;
+			}
 
-					// We can't remove element as we need a reference for insertBefore
-	/*
-					let tpl = document.createElement('template');
-					el.before(tpl);
-					el.remove();
-					tpl.content.appendChild(el);
-	*/
-					el.hidden = true;
-					el.style.display = "none";
-
-					context[items.prop] = new Proxy(context[items.prop], {
-						get: (target, prop/*, receiver*/) => {
-							if (prop in target) {
-								switch (prop)
-								{
-								// Set
-								case 'clear':
-									return () => {
-										items.forEach(item => item.remove());
-										items.length = 0;
-										return target.clear();
-									};
-								case 'add':
-								case 'delete':
-									throw new Error('Set.prototype.'+prop+'() not supported');
-								// Array mutator methods
-								case 'copyWithin':
-								case 'fill':
-								case 'reverse':
-								case 'sort':
-									throw new Error('Array.prototype.'+prop+'() not supported');
-								case 'shift':
-	//							case 'pop':
-									return () => {
-										let item = items[prop]();
-										item && item.remove();
-										return target[prop]();
-									};
-								case 'unshift':
-									return (...args) => {
-										let i = args.length;
-										while (i--) items.add(args[i], 0);
-	//									args.forEach((item, i) => items.add(item, i));
-										return target.unshift(...args);
-									};
-								case 'splice':
-									return (...args) => {
-										if (0 < args[1]) {
-											let i = Math.min(items.length, args[0] + args[1]);
-											while (args[0] < i--) items[i].remove();
-											items.splice(args[0], args[1]);
-										}
-										for (let i = 2; i < args.length; ++i) {
-											items.add(args[i], args[0]);
-										}
-										return target.splice(...args);
-									};
-	/*
-								case 'push':
-									return (...args) => {
-										args.forEach(item => items.add(item));
-										return target.push(...args);
-									};
-	*/
-								}
-								return target[prop];
-	//							let value = Reflect.get(target, prop, receiver);
-	//							return isFunction(value) ? value.bind(target) : value;
-							}
-						},
-						set: (target, prop, value) => {
-							if (target[prop] !== value) {
-								target[prop] = value;
-								if ('length' === prop) {
-									while (items.length > value) {
-										items.pop().remove();
-									}
-								} else if (isFinite(prop)) {
-									if (prop in items) {
-										items[prop].textContent = value;
-									} else {
-										items.add(value);
-									}
-								}
-							}
-							return true;
-						}
-					});
-
-					repeat = items;
-					repeaters.push(repeat);
-
-					// Fill the list with current repeat values
-					context[items.prop].forEach(value => items.add(value));
-				}
-
-				value = popAttribute(el, 'tal:content');
-				if (null != value) {
-					Statements.content(el, value, context);
-				} else if (null != (value = popAttribute(el, 'tal:replace'))) {
-					Statements.replace(el, value, context);
-				}
-
-				value = popAttribute(el, 'tal:attributes');
+			value = popAttribute(el, "tal:content");
+			let skip = false;
+			if (null != value) {
+				Statements.content(el, value, context);
+			} else if (null != (value = popAttribute(el, "tal:replace"))) {
+				Statements.replace(el, value, context);
+				skip = true;
+			}
+			if (!skip) {
+				// Same as KnockoutJS attr:
+				value = popAttribute(el, "tal:attributes");
 				if (null != value) {
 					Statements.attributes(el, value, context);
 				}
 
-				/**
-				 * Observe native elements
-				 * like: HTMLInputElement, HTMLSelectElement, HTMLTextAreaElement, HTMLDetailsElement
-				 */
-				value = popAttribute(el, 'tal:listen');
+				if (el.hasAttribute("tal:omit-tag")) {
+					Statements["omit-tag"](el, popAttribute(el, "tal:omit-tag"), context);
+				}
+
+				// Our two-way bindings
+				value = popAttribute(el, "tal:listen");
 				if (null != value) {
-	//				value.matchAll(/([^\s;]+)\s+([^;]+)/);
-					value.split(';').forEach(attr => {
-						if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
-							if (!Tales.string(attr[2]) && el instanceof HTMLElement) {
-								const path = Tales.path(context, attr[2]),
-									ctx = path ? path[0] : context,
-									prop = path ? path[1] : attr[2];
-								if ('value' === attr[1] || 'checked' === attr[1]) {
-									el.addEventListener('change', () => ctx[prop] = el[attr[1]]);
-								}
-								if ('input' === attr[1]) {
-									el.addEventListener(attr[1], () => ctx[prop] = el.value);
-								}
-								if ('toggle' === attr[1]) {
-									el.addEventListener(attr[1], event => ctx[prop] = event.newState);
-								}
-							}
-						}
-					});
+					Statements.listen(el, value, context);
 				}
+			}
 
-				value = popAttribute(el, 'tal:omit-tag');
-				if (value) {
-					el.replaceWith(el.children);
-				}
-			});
+			el.getAttributeNames().forEach(name => name.startsWith("tal:") && el.removeAttribute(name));
+		});
 
-			return context;
-		}
-		return obj;
+		return context;
 	}
 
 	//import { observeDOMNode } from 'observers/dom';
@@ -609,7 +757,8 @@
 	window.TAL = {
 		parse,
 		observeObject,
-		observeProperty
+		observeProperty,
+		TalError
 	};
 
 })();
