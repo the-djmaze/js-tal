@@ -21,7 +21,7 @@ const
 			node.remove();
 		}
 	},
-	resolveTales = (context, expression) => {
+	resolveTales = (expression, context) => {
 		let fn = Tales.js(expression, context);
 		if (!fn) {
 			fn = Tales.path(expression, context);
@@ -29,7 +29,7 @@ const
 				console.error(`Path '${expression}' not found`, context);
 			}
 		}
-		return fn;
+		return fn?.bind(context);
 	},
 	processDetectedObservables = (el, fn) =>
 		getDetectedObservables().forEach(([obj, prop]) =>
@@ -48,7 +48,7 @@ export class Statements
 			attr = attr.trim().match(/^([^\s]+)\s+(.+)$/);
 			let text = Tales.string(attr[2]);
 			if (null == text) {
-				let getter = resolveTales(context, attr[2]);
+				let getter = resolveTales(attr[2], context);
 				if (getter) {
 					detectObservables();
 					text = getter(context);
@@ -73,11 +73,11 @@ export class Statements
 			text = Tales.string(expression),
 			mode = "structure" === match[1] ? "innerHTML" : "textContent";
 		if (null == text) {
-			let getter = resolveTales(context, expression);
+			let getter = resolveTales(expression, context);
 			if (getter) {
 				detectObservables();
 				text = getter(context);
-				processDetectedObservables(el, () => el[mode] = getter());
+				processDetectedObservables(el, () => el[mode] = getter(context));
 			}
 		}
 		el[mode] = text;
@@ -98,7 +98,7 @@ export class Statements
 			fn = string => el.replaceWith(string);
 		}
 		if (null == text) {
-			let getter = resolveTales(context, expression);
+			let getter = resolveTales(expression, context);
 			if (getter) {
 				if ("structure" === match[1]) {
 					// Because the Element is replaced, it is gone
@@ -132,12 +132,18 @@ export class Statements
 	static define(el, expression, context) {
 		expression.split(";").forEach(def => {
 			def = def.trim().match(/^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/);
-			def[3] = Tales.string(def[3]) || def[3];
+			let text = Tales.string(def[3]);
+			if (null == text) {
+				let getter = resolveTales(expression, context);
+				if (getter) {
+					text = getter(context);
+				}
+			}
 			if ("global" === def[1]) {
 				// TODO: get root context
-				context[def[2]] = def[3];
+				context[def[2]] = text;
 			} else {
-				context[def[2]] = def[3];
+				context[def[2]] = text;
 			}
 		});
 	}
@@ -158,7 +164,7 @@ export class Statements
 				}
 			};
 		if (null == text) {
-			let getter = resolveTales(context, expression);
+			let getter = resolveTales(expression, context);
 			if (getter) {
 				detectObservables();
 				text = getter(context);
@@ -266,7 +272,7 @@ export class Statements
 	 */
 	static ["omit-tag"](el, expression, context) {
 		if (expression) {
-			let getter = resolveTales(context, expression);
+			let getter = resolveTales(expression, context);
 			if (getter) {
 //				detectObservables();
 				expression = getter(context);

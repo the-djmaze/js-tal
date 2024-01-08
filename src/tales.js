@@ -52,7 +52,7 @@ export class Tales
 			}
 			let fn = context[match[l]];
 			if (!isFunction(fn)) {
-				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]).bind(context);
+				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]);
 			}
 			return fn;
 		}
@@ -61,7 +61,8 @@ export class Tales
 	static js(expr, context) {
 		expr = expr.trim().match(/^(?:js:)(.*)$/);
 		if (expr) {
-			return new Function("$context", `with($context){return ${expr[1]}}`);
+			expr = new Function("$context", `with($context){return ${expr[1]}}`)
+			return () => expr(context);
 		}
 	}
 }
