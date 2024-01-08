@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html xmlns:tal="http://xml.zope.org/namespaces/tal">
+<head>
+<head>
+	<meta charset="utf-8">
+	<title></title>
+	<script src='../build/tal.js'></script>
+	<script src='knockout.js'></script>
+</head>
+<body>
+
+<button data-bind="click: toggleCondition">toggle condition true/false</button>
+<div class="tal-condition" data-bind="if: foobar">
+	<div class="tal-define" tal:define="variable_name 'foobar'">
+		<ul>
+			<li><b>tal-repeat Array or Set</b>
+				<br/>
+				<button data-bind="click: pushListItem">push(time)</button>
+				<button data-bind="click: popListItem">item = pop()</button>
+				<button data-bind="click: unshiftListItem">unshift(time)</button>
+				<button data-bind="click: shiftListItem">item = shift()</button>
+				<button data-bind="click: spliceListItem">splice(1,1,'spliced')</button>
+			</li>
+			<li class="tal-repeat" data-bind="foreach: list, text: $data">this content is replaced</li>
+			<li class="tal-repeat" data-bind="foreach: list">
+				<b data-bind="text: $data">this content is replaced</b>
+				<var data-bind="text: variable_name"></var>
+			</li>
+		</ul>
+
+		<ul>
+			<li><b>tal-repeat Array of objects</b>
+				<br/>
+				<button data-bind="click: pushList2Item">push(time)</button>
+				<button data-bind="click: popList2Item">item = pop()</button>
+				<button data-bind="click: unshiftList2Item">unshift(time)</button>
+				<button data-bind="click: shiftList2Item">item = shift()</button>
+				<button data-bind="click: spliceList2Item">splice(1,1,'spliced')</button>
+			</li>
+			<li class="tal-repeat" data-bind="foreach: list2, text: name">this content is replaced</li>
+			<li class="tal-repeat" data-bind="foreach: list2">
+				<b data-bind="text: id">this content is replaced</b>
+				<!-- ko text: name -->this content is replaced<!-- /ko -->
+				<var data-bind="text: variable_name"></var>
+			</li>
+		</ul>
+
+		<input id="tal-attributes" data-bind="value: name" type="text"/>
+		<button data-bind="click: toggleName">value = time</button>
+		<button data-bind="click: toggleListItem">list[0] = name</button>
+		<br/>
+		<var data-bind="text: name"></var>
+		<br/>
+		<var data-bind="text: nameIs"></var>
+
+		<hr/>
+		<input data-bind="textInput: nameLive" type="text"/>
+		<br/>
+		<var data-bind="text: nameLive"></var>
+		<br/>
+		<var data-bind="text: nameLiveIs"></var>
+
+		<hr/>
+		<div class="tal-omit-tag" tal:omit-tag="">omit-tag</div>
+		<div class="tal-omit-tag" tal:omit-tag="omit">don't omit-tag</div>
+
+		<hr/>
+		<div class="tal-content" data-bind="text: 'replaced div'"></div>
+		<div class="tal-content" data-bind="text: variable_name"></div>
+		<div class="tal-content" data-bind="html: html"></div>
+		<button data-bind="click: setHTML">setHTML</button>
+	</div>
+
+	<hr/>
+	<details data-bind="attr:{open:details},event:{toggle:toggle}">
+		<summary>Details summary</summary>
+		Details content
+	</details>
+	<var data-bind="text: toggle"></var>
+
+	<hr/>
+	<var data-bind="text: subtree/foo"></var>
+	<button data-bind="click: setSubtree">setSubtree</button>
+
+	<hr/>
+	<b data-bind="text: 'tal-content string'">tal-content</b>
+
+	<hr/>
+	<b data-bind="text: 'js:variable_name = ' + variable_name">js:variable_name</b>
+</div>
+
+<script>
+const context = TAL.observeObject({
+	omit: false,
+	foobar: true,
+	list: [
+		'item 1',
+		'item 2'
+	],
+	list2: [
+		{id:1, name:'item 11'},
+		{id:2, name:'item 12'}
+	],
+	name: 'my name',
+	nameLive: 'my name live',
+	toggle: 'closed',
+	html: '<div>test</div>',
+	subtree: {
+		foo: 'subtree/foo'
+	},
+
+	toggleCondition:  () => context.foobar = !context.foobar,
+	toggleName:       () => context.name = Date.now(),
+	toggleListItem:   () => context.list[0] = document.getElementById('tal-attributes').value,
+	pushListItem:     () => context.list.push(Date.now()),
+	unshiftListItem:  () => context.list.unshift(Date.now()),
+	shiftListItem:    () => context.list.shift(),
+	popListItem:      () => context.list.pop(),
+	spliceListItem:   () => context.list.splice(1,1,'spliced'),
+	pushList2Item:    () => context.list2.push({id:Date.now(), name:'push '+Date.now()}),
+	unshiftList2Item: () => context.list2.unshift({id:Date.now(), name:'unshift '+Date.now()}),
+	shiftList2Item:   () => context.list2.shift(),
+	popList2Item:     () => context.list2.pop(),
+	spliceList2Item:  () => context.list2.splice(1,1,{id:Date.now(), name:'spliced '+Date.now()}),
+	setHTML:          () => context.html = '<div>'+Date.now()+'</div>',
+	setSubtree: function() {
+		console.dir({setSubtreeScope:this});
+		context.subtree.foo = 'subtree.foo = ' + Date.now()
+	}
+});
+context.defineComputed('nameIs', ()=>'name = '+context.name);
+context.defineComputed('nameLiveIs', ()=>'name = '+context.nameLive);
+context.defineComputed('details', ()=>'open' == context.toggle);
+
+const obj = TAL.parse(document.body, context);
+
+//context.refreshObservers();
+</script>
+</body>
+</html>
