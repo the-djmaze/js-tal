@@ -44,6 +44,20 @@
 			</li>
 		</ul>
 
+		<ul>
+			<li><b>tal-repeat sub</b></li>
+			<li class="tal-repeat" tal:repeat="item subrepeat">
+				<b tal:content="item/id">this content is replaced</b>
+				<var tal:replace="item/name">this element is replaced</var>
+				<ul>
+					<li class="tal-repeat" tal:repeat="item item/subitems">
+						<b tal:content="item/id">this content is replaced</b>
+						<var tal:replace="item/name">this content is replaced</var>
+					</li>
+				</ul>
+			</li>
+		</ul>
+
 		<input id="tal-attributes" tal:attributes="value name; type 'text'" tal:listen="value name"/>
 		<button tal:listen="click toggleName">value = time</button>
 		<button tal:listen="click toggleListItem">list[0] = name</button>
@@ -109,6 +123,25 @@ const context = TAL.observeObject({
 	subtree: {
 		foo: 'subtree/foo'
 	},
+
+	subrepeat: [
+		{
+			id:1,
+			name:'subitem 1',
+			subitems: [
+				{id:11, name:'subitem 1-1'},
+				{id:12, name:'subitem 1-2'}
+			]
+		},
+		{
+			id:2,
+			name:'subitem 2',
+			subitems: [
+				{id:21, name:'subitem 2-1'},
+				{id:22, name:'subitem 2-2'}
+			]
+		},
+	],
 
 	toggleCondition:  () => context.foobar = !context.foobar,
 	toggleName:       () => context.name = Date.now(),

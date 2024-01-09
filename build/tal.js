@@ -462,10 +462,7 @@
 			}
 			return fn;
 		},
-		getterValue = (fn, context) => {
-			fn = isFunction(fn) ? fn(context) : fn;
-			return isFunction(fn) ? fn() : fn;
-		},
+		getterValue = getter => isFunction(getter) ? getter() : getter,
 		processDetectedObservables = (el, fn) =>
 			getDetectedObservables().forEach(([obj, prop]) =>
 				observe(el, obj, prop, fn)
@@ -486,15 +483,23 @@
 					let getter = resolveTales(attr[2], context);
 					if (getter) {
 						detectObservables();
-						text = getterValue(getter, context);
+						text = getterValue(getter);
 						processDetectedObservables(el, value => {
-							value = getterValue(getter, context);
-							el.setAttribute(attr[1], value);
+							value = getterValue(getter);
+							if (false === value || null == value) {
+								el.removeAttribute(attr[1], value);
+							} else {
+								el.setAttribute(attr[1], value);
+							}
 							el[attr[1]] = value;
 						});
 					}
 				}
-				el.setAttribute(attr[1], text);
+				if (false === text || null == text) {
+					el.removeAttribute(attr[1], text);
+				} else {
+					el.setAttribute(attr[1], text);
+				}
 			});
 		}
 
@@ -511,8 +516,8 @@
 				let getter = resolveTales(expression, context);
 				if (getter) {
 					detectObservables();
-					text = getterValue(getter, context);
-					processDetectedObservables(el, () => el[mode] = getterValue(getter, context));
+					text = getterValue(getter);
+					processDetectedObservables(el, () => el[mode] = getterValue(getter));
 				}
 			}
 			el[mode] = text;
@@ -554,8 +559,8 @@
 						fn = string => node.nodeValue = string;
 					}
 					detectObservables();
-					text = getterValue(getter, context);
-					processDetectedObservables(el, () => fn(getterValue(getter, context)));
+					text = getterValue(getter);
+					processDetectedObservables(el, () => fn(getterValue(getter)));
 				}
 			}
 			fn(text);
@@ -572,7 +577,7 @@
 				if (null == text) {
 					let getter = resolveTales(expression, context);
 					if (getter) {
-						text = getterValue(getter, context);
+						text = getterValue(getter);
 					}
 				}
 				if ("global" === def[1]) {
@@ -604,8 +609,8 @@
 				let getter = resolveTales(expression, context);
 				if (getter) {
 					detectObservables();
-					text = getterValue(getter, context);
-					processDetectedObservables(el, () => fn(getterValue(getter, context)));
+					text = getterValue(getter);
+					processDetectedObservables(el, () => fn(getterValue(getter)));
 				}
 			}
 			fn(text);
@@ -628,89 +633,100 @@
 	//		context = TalContext;
 	//		context = observeObject(context[repeater.prop]);
 	//		contextTree.push(context);
-			const items = [],
-				array = context[match[2]],
-				target = el.ownerDocument.createTextNode(""),
-				createItem = value => {
-					let node = el.cloneNode(true), subContext;
-					try {
-						value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
-					} catch (e) {
-						console.error(e);
-					}
-					if ('context' == match[1] && isObserved(value)) {
-						subContext = value;
+			let array = Tales.string(match[2]);
+			if (null == array) {
+				let getter = resolveTales(match[2], context);
+				if (getter) {
+					array = getterValue(getter);
+				}
+			}
+			if (array) {
+				const items = [],
+					target = el.ownerDocument.createTextNode(""),
+					createItem = value => {
+						let node = el.cloneNode(true), subContext;
+						try {
+							value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
+						} catch (e) {
+							console.error(e);
+						}
+						if ('context' == match[1] && isObserved(value)) {
+							subContext = value;
+						} else {
+							subContext = observeObject(nullObject(), context);
+							subContext[match[1]] = value;
+						}
+						parser(node, subContext);
+						return node;
+					};
+
+				items.name = match[1];
+				items.hasChild = node => el.contains(node);
+				items.add = (value, pos) => {
+					let node = createItem(value);
+					if (isFinite(pos) && pos < items.length) {
+						if (0 == pos) {
+							items[0].before(node);
+							items.unshift(node);
+						} else {
+							items[pos].before(node);
+							items.splice(pos, 0, node);
+						}
 					} else {
-						subContext = observeObject(nullObject(), context);
-						subContext[match[1]] = value;
+						target.before(node);
+		//				items.length ? items[items.length-1].after(node) : items.parent.insertBefore(node, target);
+						items.push(node);
 					}
-					parser(node, subContext);
-					return node;
 				};
-			items.name = match[1];
-			items.hasChild = node => el.contains(node);
-			items.add = (value, pos) => {
-				let node = createItem(value);
-				if (isFinite(pos) && pos < items.length) {
-					if (0 == pos) {
-						items[0].before(node);
-						items.unshift(node);
-					} else {
-						items[pos].before(node);
-						items.splice(pos, 0, node);
-					}
-				} else {
-					target.before(node);
-	//				items.length ? items[items.length-1].after(node) : items.parent.insertBefore(node, target);
-					items.push(node);
+
+				el.replaceWith(target);
+
+				if (!isObserved(array)) {
+					let observable = observeArray(array, context);
+					observe(el, observable, "clear", () => {
+						items.forEach(removeNode);
+						items.length = 0;
+					});
+					observe(el, observable, "shift", () => removeNode(items.shift()));
+					observe(el, observable, "unshift", (args) => {
+						let i = args.length;
+						while (i--) items.add(args[i], 0);
+			//			args.forEach((item, i) => items.add(item, i));
+					});
+					observe(el, observable, "splice", (args) => {
+						if (0 < args[1]) {
+							let i = Math.min(items.length, args[0] + args[1]);
+							while (args[0] < i--) removeNode(items[i]);
+							items.splice(args[0], args[1]);
+						}
+						for (let i = 2; i < args.length; ++i) {
+							items.add(args[i], args[0]);
+						}
+					});
+					observe(el, observable, "push", (args) => {
+						args.forEach(item => items.add(item));
+					});
+					observe(el, observable, "length", length => {
+						while (items.length > length) removeNode(items.pop());
+					});
+					observe(el, observable, "set", item => {
+						if (item.index in items) {
+							let node = createItem(item.value);
+							items[item.index].replaceWith(node);
+							items[item.index] = node;
+						} else {
+							items.add(item.value, item.index);
+						}
+					});
+
+					context[match[2]] = observable;
 				}
-			};
 
-			el.replaceWith(target);
+				// Fill the list with current repeat values
+				array.forEach((value, pos) => items.add(value, pos));
 
-			let observable = observeArray(array, context);
-			observe(el, observable, "clear", () => {
-				items.forEach(removeNode);
-				items.length = 0;
-			});
-			observe(el, observable, "shift", () => removeNode(items.shift()));
-			observe(el, observable, "unshift", (args) => {
-				let i = args.length;
-				while (i--) items.add(args[i], 0);
-	//			args.forEach((item, i) => items.add(item, i));
-			});
-			observe(el, observable, "splice", (args) => {
-				if (0 < args[1]) {
-					let i = Math.min(items.length, args[0] + args[1]);
-					while (args[0] < i--) removeNode(items[i]);
-					items.splice(args[0], args[1]);
-				}
-				for (let i = 2; i < args.length; ++i) {
-					items.add(args[i], args[0]);
-				}
-			});
-			observe(el, observable, "push", (args) => {
-				args.forEach(item => items.add(item));
-			});
-			observe(el, observable, "length", length => {
-				while (items.length > length) removeNode(items.pop());
-			});
-			observe(el, observable, "set", item => {
-				if (item.index in items) {
-					let node = createItem(item.value);
-					items[item.index].replaceWith(node);
-					items[item.index] = node;
-				} else {
-					items.add(item.value, item.index);
-				}
-			});
-
-			context[match[2]] = observable;
-
-			// Fill the list with current repeat values
-			array.forEach((value, pos) => items.add(value, pos));
-
-			return items;
+				return items;
+			}
 		}
 
 		/**
@@ -722,8 +738,8 @@
 				let getter = resolveTales(expression, context);
 				if (getter) {
 	//				detectObservables();
-					expression = getterValue(getter, context);
-	//				processDetectedObservables(el, () => fn(getterValue(getter, context)));
+					expression = getterValue(getter);
+	//				processDetectedObservables(el, () => fn(getterValue(getter)));
 				}
 			} else {
 				expression = true;
