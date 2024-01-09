@@ -22,13 +22,7 @@ const
 			node.remove();
 		}
 	},
-	resolveTales = (expression, context) => {
-		let fn = Tales.js(expression, context);
-		if (!fn) {
-			fn = Tales.path(expression, context);
-		}
-		return fn;
-	},
+	resolveTales = (expression, context) => Tales.resolve(expression, context),
 	getterValue = getter => isFunction(getter) ? getter() : getter,
 	processDetectedObservables = (el, fn) =>
 		getDetectedObservables().forEach(([obj, prop]) =>
@@ -45,22 +39,19 @@ export class Statements
 //		value.matchAll(/([^\s;]+)\s+([^;]+)/);
 		value.split(";").forEach(attr => {
 			attr = attr.trim().match(/^([^\s]+)\s+(.+)$/);
-			let text = Tales.string(attr[2]);
-			if (null == text) {
-				let getter = resolveTales(attr[2], context);
-				if (getter) {
-					detectObservables();
-					text = getterValue(getter);
-					processDetectedObservables(el, value => {
-						value = getterValue(getter);
-						if (false === value || null == value) {
-							el.removeAttribute(attr[1], value);
-						} else {
-							el.setAttribute(attr[1], value);
-						}
-						el[attr[1]] = value;
-					});
-				}
+			let text, getter = resolveTales(attr[2], context);
+			if (getter) {
+				detectObservables();
+				text = getterValue(getter);
+				processDetectedObservables(el, value => {
+					value = getterValue(getter);
+					if (false === value || null == value) {
+						el.removeAttribute(attr[1], value);
+					} else {
+						el.setAttribute(attr[1], value);
+					}
+					el[attr[1]] = value;
+				});
 			}
 			if (false === text || null == text) {
 				el.removeAttribute(attr[1], text);
@@ -77,15 +68,12 @@ export class Statements
 	static content(el, value, context) {
 		let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
 			expression = match[2],
-			text = Tales.string(expression),
+			text, getter = resolveTales(expression, context),
 			mode = "structure" === match[1] ? "innerHTML" : "textContent";
-		if (null == text) {
-			let getter = resolveTales(expression, context);
-			if (getter) {
-				detectObservables();
-				text = getterValue(getter);
-				processDetectedObservables(el, () => el[mode] = getterValue(getter));
-			}
+		if (getter) {
+			detectObservables();
+			text = getterValue(getter);
+			processDetectedObservables(el, () => el[mode] = getterValue(getter));
 		}
 		el[mode] = text;
 	}
@@ -97,38 +85,34 @@ export class Statements
 	static replace(el, value, context) {
 		let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
 			expression = match[2],
-			text = Tales.string(expression),
+			text, getter = resolveTales(expression, context),
 			fn;
-		if ("structure" === match[1]) {
+		if (isFunction(getter)) {
+			if ("structure" === match[1]) {
+				// Because the Element is replaced, it is gone
+				// So we prepend an empty TextNode as reference
+				let node = document.createTextNode(""), frag;
+				el.replaceWith(node);
+				// Now we can put/replace the HTML after the empty TextNode
+				fn = string => {
+					frag && frag.forEach(el => el.remove());
+					const template = document.createElement("template");
+					template.innerHTML = string.trim();
+					frag = Array.from(template.content.childNodes);
+					node.after(template.content);
+				};
+			} else {
+				let node = document.createTextNode("");
+				el.replaceWith(node);
+				fn = string => node.nodeValue = string;
+			}
+			detectObservables();
+			text = getterValue(getter);
+			processDetectedObservables(el, () => fn(getterValue(getter)));
+		} else if ("structure" === match[1]) {
 			fn = string => el.outerHTML = string;
 		} else {
 			fn = string => el.replaceWith(string);
-		}
-		if (null == text) {
-			let getter = resolveTales(expression, context);
-			if (getter) {
-				if ("structure" === match[1]) {
-					// Because the Element is replaced, it is gone
-					// So we prepend an empty TextNode as reference
-					let node = document.createTextNode(""), frag;
-					el.replaceWith(node);
-					// Now we can put/replace the HTML after the empty TextNode
-					fn = string => {
-						frag && frag.forEach(el => el.remove());
-						const template = document.createElement("template");
-						template.innerHTML = string.trim();
-						frag = Array.from(template.content.childNodes);
-						node.after(template.content);
-					};
-				} else {
-					let node = document.createTextNode("");
-					el.replaceWith(node);
-					fn = string => node.nodeValue = string;
-				}
-				detectObservables();
-				text = getterValue(getter);
-				processDetectedObservables(el, () => fn(getterValue(getter)));
-			}
 		}
 		fn(text);
 	}
@@ -140,18 +124,17 @@ export class Statements
 	static define(el, expression, context) {
 		expression.split(";").forEach(def => {
 			def = def.trim().match(/^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/);
-			let text = Tales.string(def[3]);
-			if (null == text) {
-				let getter = resolveTales(expression, context);
-				if (getter) {
-					text = getterValue(getter);
-				}
-			}
+			let getter = resolveTales(def[3], context),
+				text = getter ? getterValue(getter) : "",
+				prop = getter.prop || def[2];
+			context = getter.context || context;
 			if ("global" === def[1]) {
 				// TODO: get root context
-				context[def[2]] = text;
+				context[prop] = text;
+			} else if (prop in context && isFunction(context[prop])) {
+				context[prop](text, el);
 			} else {
-				context[def[2]] = text;
+				context[prop] = text;
 			}
 		});
 	}
@@ -162,7 +145,7 @@ export class Statements
 	 */
 	static condition(el, expression, context, parser) {
 		let tree = el.cloneNode(true),
-			text = Tales.string(expression),
+			text, getter = resolveTales(expression, context),
 			fn = value => {
 				[...el.childNodes].forEach(removeNode);
 //				el.textContent = "";
@@ -172,13 +155,10 @@ export class Statements
 					el.append(...node.childNodes);
 				}
 			};
-		if (null == text) {
-			let getter = resolveTales(expression, context);
-			if (getter) {
-				detectObservables();
-				text = getterValue(getter);
-				processDetectedObservables(el, () => fn(getterValue(getter)));
-			}
+		if (getter) {
+			detectObservables();
+			text = getterValue(getter);
+			processDetectedObservables(el, () => fn(getterValue(getter)));
 		}
 		text || fn(text);
 		return {

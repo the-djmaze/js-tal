@@ -11,6 +11,13 @@ import { isFunction, isObserved, TalError } from 'common';
  */
 export class Tales
 {
+	static resolve(expr, context, writer) {
+		let match = expr.trim().match(/^([a-z]+):/);
+		if (match && Tales[match[1]]) {
+			return Tales[match[1]](expr, context, writer);
+		}
+		return Tales.path(expr, context, writer) || Tales.string(expr);
+	}
 /**
 	TALES:
 		'exists:'
@@ -21,10 +28,20 @@ export class Tales
 		'js:'
 */
 	static string(expr) {
-		expr = expr.trim().match(/^(?:'([^']*)'|"([^"]*)"|string:(.*))$/);
-		return expr
-			? (null != expr[3]) ? expr[3] : ((null != expr[2]) ? expr[2] : expr[1])
-			: null;
+		expr = expr.trim().match(/^(?:'([^']*)'|"([^"]*)"|string:(.*))$/) || [];
+		expr[0] = null;
+		return expr.find(str => null != str);
+	}
+
+	static not(expr, context) {
+		let match = expr.trim().match(/^not:(.+)$/);
+		if (match) {
+			let fn = Tales.resolve(match[1], context);
+			let result = () => !fn();
+			result.context = fn.context;
+			result.prop = fn.prop;
+			return result;
+		}
 	}
 
 	static path(expr, context, writer) {
@@ -70,7 +87,7 @@ export class Tales
 	}
 
 	static js(expr, context) {
-		expr = expr.trim().match(/^(?:js:)(.*)$/);
+		expr = expr.trim().match(/^js:(.*)$/);
 		if (expr) {
 			let fn = new Function("$context", `with($context){return ${expr[1]}}`)
 			return () => {
