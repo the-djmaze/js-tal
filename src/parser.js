@@ -20,17 +20,14 @@ export function parse(template, context)
 
 	// elements is a static (not live) NodeList
 	// template root node must be prepended as well
-	let repeat, repeaters = [];
+	let skippers = [];
 	(template instanceof HTMLTemplateElement
 		? template.content.querySelectorAll(Statements.cssQuery)
 		: [template, ...template.querySelectorAll(Statements.cssQuery)]
 	).forEach(el => {
-		if (repeat) {
-			if (repeat.hasChild(el)) {
-				// Skip this element as it is handled by Statements.repeat
-				return;
-			}
-			repeat = repeaters.pop();
+		if (skippers.some(parent => parent.hasChild(el))) {
+			// Skip this element as it is handled by Statements.repeat or Statements.condition
+			return;
 		}
 
 		let value = popAttribute(el, "tal:define");
@@ -47,13 +44,12 @@ export function parse(template, context)
 
 		value = popAttribute(el, "tal:condition");
 		if (null != value) {
-			Statements.condition(el, value, context, parse);
+			skippers.push(Statements.condition(el, value, context, parse));
 		}
 
 		value = popAttribute(el, "tal:repeat");
 		if (null != value) {
-			repeat = Statements.repeat(el, value, context, parse);
-			repeaters.push(repeat);
+			skippers.push(Statements.repeat(el, value, context, parse));
 			return;
 		}
 
@@ -100,7 +96,6 @@ export function parse(template, context)
 
 		el.getAttributeNames().forEach(name => name.startsWith("tal:") && el.removeAttribute(name));
 	});
-
 	return context;
 }
 

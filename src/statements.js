@@ -26,9 +26,6 @@ const
 		let fn = Tales.js(expression, context);
 		if (!fn) {
 			fn = Tales.path(expression, context);
-			if (!fn) {
-				console.error(`Path '${expression}' not found`, context);
-			}
 		}
 		return fn;
 	},
@@ -183,7 +180,10 @@ export class Statements
 				processDetectedObservables(el, () => fn(getterValue(getter)));
 			}
 		}
-		fn(text);
+		text || fn(text);
+		return {
+			hasChild: node => !text && el.contains(node)
+		}
 	}
 
 	/**
@@ -197,106 +197,98 @@ export class Statements
 	 *     </div>
 	 * </div>
 	 */
-	static repeat(el, value, context, parser) {
-		const match = value.trim().match(/^([^\s]+)\s+(.+)$/);
-//		console.dir({match});
-//		context = TalContext;
-//		context = observeObject(context[repeater.prop]);
-//		contextTree.push(context);
-		let array = Tales.string(match[2]);
-		if (null == array) {
-			let getter = resolveTales(match[2], context);
-			if (getter) {
-				array = getterValue(getter);
-			}
-		}
-		if (array) {
-			const items = [],
-				target = el.ownerDocument.createTextNode(""),
-				createItem = value => {
-					let node = el.cloneNode(true), subContext;
-					try {
-						value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
-					} catch (e) {
-						console.error(e);
-					}
-					if ('context' == match[1] && isObserved(value)) {
-						subContext = value;
-					} else {
-						subContext = observeObject(nullObject(), context);
-						subContext[match[1]] = value;
-					}
-					parser(node, subContext);
-					return node;
-				};
-
-			items.name = match[1];
-			items.hasChild = node => el.contains(node);
-			items.add = (value, pos) => {
-				let node = createItem(value);
-				if (isFinite(pos) && pos < items.length) {
-					if (0 == pos) {
-						items[0].before(node);
-						items.unshift(node);
-					} else {
-						items[pos].before(node);
-						items.splice(pos, 0, node);
-					}
-				} else {
-					target.before(node);
-	//				items.length ? items[items.length-1].after(node) : items.parent.insertBefore(node, target);
-					items.push(node);
+	static repeat(el, expression, context, parser) {
+		const match = expression.trim().match(/^([^\s]+)\s+(.+)$/),
+			items = [],
+			target = el.ownerDocument.createTextNode(""),
+			createItem = value => {
+				let node = el.cloneNode(true), subContext;
+				try {
+					value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
+				} catch (e) {
+					console.error(e);
 				}
+				if ('context' == match[1] && isObserved(value)) {
+					subContext = value;
+				} else {
+					subContext = observeObject(nullObject(), context);
+					subContext[match[1]] = value;
+				}
+				parser(node, subContext);
+				return node;
 			};
 
-			el.replaceWith(target);
-
-			if (!isObserved(array)) {
-				let observable = observeArray(array, context);
-				observe(el, observable, "clear", () => {
-					items.forEach(removeNode);
-					items.length = 0;
-				});
-				observe(el, observable, "shift", () => removeNode(items.shift()));
-				observe(el, observable, "unshift", (args) => {
-					let i = args.length;
-					while (i--) items.add(args[i], 0);
-		//			args.forEach((item, i) => items.add(item, i));
-				});
-				observe(el, observable, "splice", (args) => {
-					if (0 < args[1]) {
-						let i = Math.min(items.length, args[0] + args[1]);
-						while (args[0] < i--) removeNode(items[i]);
-						items.splice(args[0], args[1]);
-					}
-					for (let i = 2; i < args.length; ++i) {
-						items.add(args[i], args[0]);
-					}
-				});
-				observe(el, observable, "push", (args) => {
-					args.forEach(item => items.add(item));
-				});
-				observe(el, observable, "length", length => {
-					while (items.length > length) removeNode(items.pop());
-				});
-				observe(el, observable, "set", item => {
-					if (item.index in items) {
-						let node = createItem(item.value);
-						items[item.index].replaceWith(node);
-						items[item.index] = node;
-					} else {
-						items.add(item.value, item.index);
-					}
-				});
-
-				context[match[2]] = observable;
+		items.name = match[1];
+		items.hasChild = node => el.contains(node);
+		items.add = (value, pos) => {
+			let node = createItem(value);
+			if (isFinite(pos) && pos < items.length) {
+				if (0 == pos) {
+					items[0].before(node);
+					items.unshift(node);
+				} else {
+					items[pos].before(node);
+					items.splice(pos, 0, node);
+				}
+			} else {
+				target.before(node);
+//				items.length ? items[items.length-1].after(node) : items.parent.insertBefore(node, target);
+				items.push(node);
 			}
+		};
+
+		el.replaceWith(target);
+
+		let getter = Tales.path(match[2], context);
+		let array = getter ? getterValue(getter) : null;
+		if (array) {
+			if (!isObserved(array)) {
+				array = observeArray(array, context);
+				getter.context[getter.prop] = array;
+			}
+			observe(el, array, "clear", () => {
+				items.forEach(removeNode);
+				items.length = 0;
+			});
+			observe(el, array, "shift", () => removeNode(items.shift()));
+			observe(el, array, "unshift", (args) => {
+				let i = args.length;
+				while (i--) items.add(args[i], 0);
+	//			args.forEach((item, i) => items.add(item, i));
+			});
+			observe(el, array, "splice", (args) => {
+				if (0 < args[1]) {
+					let i = Math.min(items.length, args[0] + args[1]);
+					while (args[0] < i--) removeNode(items[i]);
+					items.splice(args[0], args[1]);
+				}
+				for (let i = 2; i < args.length; ++i) {
+					items.add(args[i], args[0]);
+				}
+			});
+			observe(el, array, "push", (args) => {
+				args.forEach(item => items.add(item));
+			});
+			observe(el, array, "length", length => {
+				while (items.length > length) removeNode(items.pop());
+			});
+			observe(el, array, "set", item => {
+				if (item.index in items) {
+					let node = createItem(item.value);
+					items[item.index].replaceWith(node);
+					items[item.index] = node;
+				} else {
+					items.add(item.value, item.index);
+				}
+			});
 
 			// Fill the list with current repeat values
 			array.forEach((value, pos) => items.add(value, pos));
-
-			return items;
+		} else {
+			console.error(`Path '${match[2]}' for repeat not found`, context);
 		}
+
+		return items;
 	}
 
 	/**

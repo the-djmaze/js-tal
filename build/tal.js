@@ -347,6 +347,7 @@
 				let i = 0, l = match.length - 1;
 				for (; i < l; ++i) {
 					if (!(match[i] in context)) {
+						console.error(`Path '${expr}' part '${match[i]}' not found`, context);
 						return;
 					}
 					let newContext = context[match[i]];
@@ -364,15 +365,31 @@
 				if (!isFunction(fn)) {
 					fn = (writer ? value => context[match[l]] = value : () => context[match[l]]);
 				}
-				return fn.bind(context);
+				fn = fn.bind(context);
+				let result = value => {
+					try {
+						return fn(value);
+					} catch (e) {
+						console.error(e, {expr, context});
+					}
+				};
+				result.context = context;
+				result.prop = match[l];
+				return result;
 			}
 		}
 
 		static js(expr, context) {
 			expr = expr.trim().match(/^(?:js:)(.*)$/);
 			if (expr) {
-				expr = new Function("$context", `with($context){return ${expr[1]}}`);
-				return () => expr(context);
+				let fn = new Function("$context", `with($context){return ${expr[1]}}`);
+				return () => {
+					try {
+						return fn(context);
+					} catch (e) {
+						console.error(e, {expr, context});
+					}
+				};
 			}
 		}
 	}
@@ -456,9 +473,6 @@
 			let fn = Tales.js(expression, context);
 			if (!fn) {
 				fn = Tales.path(expression, context);
-				if (!fn) {
-					console.error(`Path '${expression}' not found`, context);
-				}
 			}
 			return fn;
 		},
@@ -613,7 +627,10 @@
 					processDetectedObservables(el, () => fn(getterValue(getter)));
 				}
 			}
-			fn(text);
+			text || fn(text);
+			return {
+				hasChild: node => !text && el.contains(node)
+			}
 		}
 
 		/**
@@ -627,106 +644,98 @@
 		 *     </div>
 		 * </div>
 		 */
-		static repeat(el, value, context, parser) {
-			const match = value.trim().match(/^([^\s]+)\s+(.+)$/);
-	//		console.dir({match});
-	//		context = TalContext;
-	//		context = observeObject(context[repeater.prop]);
-	//		contextTree.push(context);
-			let array = Tales.string(match[2]);
-			if (null == array) {
-				let getter = resolveTales(match[2], context);
-				if (getter) {
-					array = getterValue(getter);
-				}
-			}
-			if (array) {
-				const items = [],
-					target = el.ownerDocument.createTextNode(""),
-					createItem = value => {
-						let node = el.cloneNode(true), subContext;
-						try {
-							value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
-						} catch (e) {
-							console.error(e);
-						}
-						if ('context' == match[1] && isObserved(value)) {
-							subContext = value;
-						} else {
-							subContext = observeObject(nullObject(), context);
-							subContext[match[1]] = value;
-						}
-						parser(node, subContext);
-						return node;
-					};
-
-				items.name = match[1];
-				items.hasChild = node => el.contains(node);
-				items.add = (value, pos) => {
-					let node = createItem(value);
-					if (isFinite(pos) && pos < items.length) {
-						if (0 == pos) {
-							items[0].before(node);
-							items.unshift(node);
-						} else {
-							items[pos].before(node);
-							items.splice(pos, 0, node);
-						}
-					} else {
-						target.before(node);
-		//				items.length ? items[items.length-1].after(node) : items.parent.insertBefore(node, target);
-						items.push(node);
+		static repeat(el, expression, context, parser) {
+			const match = expression.trim().match(/^([^\s]+)\s+(.+)$/),
+				items = [],
+				target = el.ownerDocument.createTextNode(""),
+				createItem = value => {
+					let node = el.cloneNode(true), subContext;
+					try {
+						value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
+					} catch (e) {
+						console.error(e);
 					}
+					if ('context' == match[1] && isObserved(value)) {
+						subContext = value;
+					} else {
+						subContext = observeObject(nullObject(), context);
+						subContext[match[1]] = value;
+					}
+					parser(node, subContext);
+					return node;
 				};
 
-				el.replaceWith(target);
-
-				if (!isObserved(array)) {
-					let observable = observeArray(array, context);
-					observe(el, observable, "clear", () => {
-						items.forEach(removeNode);
-						items.length = 0;
-					});
-					observe(el, observable, "shift", () => removeNode(items.shift()));
-					observe(el, observable, "unshift", (args) => {
-						let i = args.length;
-						while (i--) items.add(args[i], 0);
-			//			args.forEach((item, i) => items.add(item, i));
-					});
-					observe(el, observable, "splice", (args) => {
-						if (0 < args[1]) {
-							let i = Math.min(items.length, args[0] + args[1]);
-							while (args[0] < i--) removeNode(items[i]);
-							items.splice(args[0], args[1]);
-						}
-						for (let i = 2; i < args.length; ++i) {
-							items.add(args[i], args[0]);
-						}
-					});
-					observe(el, observable, "push", (args) => {
-						args.forEach(item => items.add(item));
-					});
-					observe(el, observable, "length", length => {
-						while (items.length > length) removeNode(items.pop());
-					});
-					observe(el, observable, "set", item => {
-						if (item.index in items) {
-							let node = createItem(item.value);
-							items[item.index].replaceWith(node);
-							items[item.index] = node;
-						} else {
-							items.add(item.value, item.index);
-						}
-					});
-
-					context[match[2]] = observable;
+			items.name = match[1];
+			items.hasChild = node => el.contains(node);
+			items.add = (value, pos) => {
+				let node = createItem(value);
+				if (isFinite(pos) && pos < items.length) {
+					if (0 == pos) {
+						items[0].before(node);
+						items.unshift(node);
+					} else {
+						items[pos].before(node);
+						items.splice(pos, 0, node);
+					}
+				} else {
+					target.before(node);
+	//				items.length ? items[items.length-1].after(node) : items.parent.insertBefore(node, target);
+					items.push(node);
 				}
+			};
+
+			el.replaceWith(target);
+
+			let getter = Tales.path(match[2], context);
+			let array = getter ? getterValue(getter) : null;
+			if (array) {
+				if (!isObserved(array)) {
+					array = observeArray(array, context);
+					getter.context[getter.prop] = array;
+				}
+				observe(el, array, "clear", () => {
+					items.forEach(removeNode);
+					items.length = 0;
+				});
+				observe(el, array, "shift", () => removeNode(items.shift()));
+				observe(el, array, "unshift", (args) => {
+					let i = args.length;
+					while (i--) items.add(args[i], 0);
+		//			args.forEach((item, i) => items.add(item, i));
+				});
+				observe(el, array, "splice", (args) => {
+					if (0 < args[1]) {
+						let i = Math.min(items.length, args[0] + args[1]);
+						while (args[0] < i--) removeNode(items[i]);
+						items.splice(args[0], args[1]);
+					}
+					for (let i = 2; i < args.length; ++i) {
+						items.add(args[i], args[0]);
+					}
+				});
+				observe(el, array, "push", (args) => {
+					args.forEach(item => items.add(item));
+				});
+				observe(el, array, "length", length => {
+					while (items.length > length) removeNode(items.pop());
+				});
+				observe(el, array, "set", item => {
+					if (item.index in items) {
+						let node = createItem(item.value);
+						items[item.index].replaceWith(node);
+						items[item.index] = node;
+					} else {
+						items.add(item.value, item.index);
+					}
+				});
 
 				// Fill the list with current repeat values
 				array.forEach((value, pos) => items.add(value, pos));
-
-				return items;
+			} else {
+				console.error(`Path '${match[2]}' for repeat not found`, context);
 			}
+
+			return items;
 		}
 
 		/**
@@ -808,17 +817,14 @@
 
 		// elements is a static (not live) NodeList
 		// template root node must be prepended as well
-		let repeat, repeaters = [];
+		let skippers = [];
 		(template instanceof HTMLTemplateElement
 			? template.content.querySelectorAll(Statements.cssQuery)
 			: [template, ...template.querySelectorAll(Statements.cssQuery)]
 		).forEach(el => {
-			if (repeat) {
-				if (repeat.hasChild(el)) {
-					// Skip this element as it is handled by Statements.repeat
-					return;
-				}
-				repeat = repeaters.pop();
+			if (skippers.some(parent => parent.hasChild(el))) {
+				// Skip this element as it is handled by Statements.repeat or Statements.condition
+				return;
 			}
 
 			let value = popAttribute(el, "tal:define");
@@ -835,13 +841,12 @@
 
 			value = popAttribute(el, "tal:condition");
 			if (null != value) {
-				Statements.condition(el, value, context, parse);
+				skippers.push(Statements.condition(el, value, context, parse));
 			}
 
 			value = popAttribute(el, "tal:repeat");
 			if (null != value) {
-				repeat = Statements.repeat(el, value, context, parse);
-				repeaters.push(repeat);
+				skippers.push(Statements.repeat(el, value, context, parse));
 				return;
 			}
 
@@ -888,7 +893,6 @@
 
 			el.getAttributeNames().forEach(name => name.startsWith("tal:") && el.removeAttribute(name));
 		});
-
 		return context;
 	}
 

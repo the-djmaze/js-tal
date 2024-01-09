@@ -37,6 +37,7 @@ export class Tales
 			let i = 0, l = match.length - 1;
 			for (; i < l; ++i) {
 				if (!(match[i] in context)) {
+					console.error(`Path '${expr}' part '${match[i]}' not found`, context);
 					return;
 				}
 				let newContext = context[match[i]];
@@ -54,15 +55,31 @@ export class Tales
 			if (!isFunction(fn)) {
 				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]);
 			}
-			return fn.bind(context);
+			fn = fn.bind(context);
+			let result = value => {
+				try {
+					return fn(value);
+				} catch (e) {
+					console.error(e, {expr, context});
+				}
+			}
+			result.context = context;
+			result.prop = match[l];
+			return result;
 		}
 	}
 
 	static js(expr, context) {
 		expr = expr.trim().match(/^(?:js:)(.*)$/);
 		if (expr) {
-			expr = new Function("$context", `with($context){return ${expr[1]}}`)
-			return () => expr(context);
+			let fn = new Function("$context", `with($context){return ${expr[1]}}`)
+			return () => {
+				try {
+					return fn(context);
+				} catch (e) {
+					console.error(e, {expr, context});
+				}
+			};
 		}
 	}
 }
