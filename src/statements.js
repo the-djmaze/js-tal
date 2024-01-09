@@ -1,6 +1,6 @@
 import { isFunction, isObject, isObserved, nullObject } from 'common';
 import { Tales } from 'tales';
-import { observeObject, observeArrayObject, detectObservables, getDetectedObservables } from 'observers/object';
+import { observeObject, observeArray, detectObservables, getDetectedObservables } from 'observers/object';
 import { observePrimitive } from 'observers/primitive';
 
 /**
@@ -32,6 +32,10 @@ const
 		}
 		return fn;
 	},
+	getterValue = (fn, context) => {
+		fn = isFunction(fn) ? fn(context) : fn;
+		return isFunction(fn) ? fn() : fn;
+	},
 	processDetectedObservables = (el, fn) =>
 		getDetectedObservables().forEach(([obj, prop]) =>
 			observe(el, obj, prop, fn)
@@ -52,9 +56,9 @@ export class Statements
 				let getter = resolveTales(attr[2], context);
 				if (getter) {
 					detectObservables();
-					text = getter(context);
+					text = getterValue(getter, context);
 					processDetectedObservables(el, value => {
-						value = getter(context);
+						value = getterValue(getter, context);
 						el.setAttribute(attr[1], value);
 						el[attr[1]] = value;
 					});
@@ -77,8 +81,8 @@ export class Statements
 			let getter = resolveTales(expression, context);
 			if (getter) {
 				detectObservables();
-				text = getter(context);
-				processDetectedObservables(el, () => el[mode] = getter(context));
+				text = getterValue(getter, context);
+				processDetectedObservables(el, () => el[mode] = getterValue(getter, context));
 			}
 		}
 		el[mode] = text;
@@ -120,8 +124,8 @@ export class Statements
 					fn = string => node.nodeValue = string;
 				}
 				detectObservables();
-				text = getter(context);
-				processDetectedObservables(el, () => fn(getter(context)));
+				text = getterValue(getter, context);
+				processDetectedObservables(el, () => fn(getterValue(getter, context)));
 			}
 		}
 		fn(text);
@@ -138,7 +142,7 @@ export class Statements
 			if (null == text) {
 				let getter = resolveTales(expression, context);
 				if (getter) {
-					text = getter(context);
+					text = getterValue(getter, context);
 				}
 			}
 			if ("global" === def[1]) {
@@ -170,8 +174,8 @@ export class Statements
 			let getter = resolveTales(expression, context);
 			if (getter) {
 				detectObservables();
-				text = getter(context);
-				processDetectedObservables(el, () => fn(getter(context)));
+				text = getterValue(getter, context);
+				processDetectedObservables(el, () => fn(getterValue(getter, context)));
 			}
 		}
 		fn(text);
@@ -234,7 +238,7 @@ export class Statements
 
 		el.replaceWith(target);
 
-		let observable = observeArrayObject(array, context);
+		let observable = observeArray(array, context);
 		observe(el, observable, "clear", () => {
 			items.forEach(removeNode);
 			items.length = 0;
@@ -288,8 +292,8 @@ export class Statements
 			let getter = resolveTales(expression, context);
 			if (getter) {
 //				detectObservables();
-				expression = getter(context);
-//				processDetectedObservables(el, () => fn(getter(context)));
+				expression = getterValue(getter, context);
+//				processDetectedObservables(el, () => fn(getterValue(getter, context)));
 			}
 		} else {
 			expression = true;

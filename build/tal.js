@@ -75,7 +75,7 @@
 	function observeObject(obj, parent/*, deep*/)
 	{
 		if (Array.isArray(obj)) {
-			return observeArrayObject(obj, parent/*, deep*/);
+			return observeArray(obj, parent/*, deep*/);
 		}
 		if (!isObject(obj)) {
 			return obj;
@@ -185,7 +185,7 @@
 		return proxy;
 	}
 
-	function observeArrayObject(obj, parent/*, deep*/)
+	function observeArray(obj, parent/*, deep*/)
 	{
 	//	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
 		if (!Array.isArray(obj)) {
@@ -462,6 +462,10 @@
 			}
 			return fn;
 		},
+		getterValue = (fn, context) => {
+			fn = isFunction(fn) ? fn(context) : fn;
+			return isFunction(fn) ? fn() : fn;
+		},
 		processDetectedObservables = (el, fn) =>
 			getDetectedObservables().forEach(([obj, prop]) =>
 				observe(el, obj, prop, fn)
@@ -482,9 +486,9 @@
 					let getter = resolveTales(attr[2], context);
 					if (getter) {
 						detectObservables();
-						text = getter(context);
+						text = getterValue(getter, context);
 						processDetectedObservables(el, value => {
-							value = getter(context);
+							value = getterValue(getter, context);
 							el.setAttribute(attr[1], value);
 							el[attr[1]] = value;
 						});
@@ -507,8 +511,8 @@
 				let getter = resolveTales(expression, context);
 				if (getter) {
 					detectObservables();
-					text = getter(context);
-					processDetectedObservables(el, () => el[mode] = getter(context));
+					text = getterValue(getter, context);
+					processDetectedObservables(el, () => el[mode] = getterValue(getter, context));
 				}
 			}
 			el[mode] = text;
@@ -550,8 +554,8 @@
 						fn = string => node.nodeValue = string;
 					}
 					detectObservables();
-					text = getter(context);
-					processDetectedObservables(el, () => fn(getter(context)));
+					text = getterValue(getter, context);
+					processDetectedObservables(el, () => fn(getterValue(getter, context)));
 				}
 			}
 			fn(text);
@@ -568,7 +572,7 @@
 				if (null == text) {
 					let getter = resolveTales(expression, context);
 					if (getter) {
-						text = getter(context);
+						text = getterValue(getter, context);
 					}
 				}
 				if ("global" === def[1]) {
@@ -600,8 +604,8 @@
 				let getter = resolveTales(expression, context);
 				if (getter) {
 					detectObservables();
-					text = getter(context);
-					processDetectedObservables(el, () => fn(getter(context)));
+					text = getterValue(getter, context);
+					processDetectedObservables(el, () => fn(getterValue(getter, context)));
 				}
 			}
 			fn(text);
@@ -664,7 +668,7 @@
 
 			el.replaceWith(target);
 
-			let observable = observeArrayObject(array, context);
+			let observable = observeArray(array, context);
 			observe(el, observable, "clear", () => {
 				items.forEach(removeNode);
 				items.length = 0;
@@ -718,8 +722,8 @@
 				let getter = resolveTales(expression, context);
 				if (getter) {
 	//				detectObservables();
-					expression = getter(context);
-	//				processDetectedObservables(el, () => fn(getter(context)));
+					expression = getterValue(getter, context);
+	//				processDetectedObservables(el, () => fn(getterValue(getter, context)));
 				}
 			} else {
 				expression = true;
@@ -788,9 +792,11 @@
 
 		// elements is a static (not live) NodeList
 		// template root node must be prepended as well
-		let elements = [template, ...template.querySelectorAll(Statements.cssQuery)];
 		let repeat, repeaters = [];
-		elements.forEach(el => {
+		(template instanceof HTMLTemplateElement
+			? template.content.querySelectorAll(Statements.cssQuery)
+			: [template, ...template.querySelectorAll(Statements.cssQuery)]
+		).forEach(el => {
 			if (repeat) {
 				if (repeat.hasChild(el)) {
 					// Skip this element as it is handled by Statements.repeat
@@ -923,6 +929,8 @@
 	window.TAL = {
 		parse,
 		observeObject,
+		observeArray,
+	//	observePrimitive,
 	//	observeProperty,
 		TalError,
 		TALES: Tales

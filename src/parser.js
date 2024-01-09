@@ -20,9 +20,11 @@ export function parse(template, context)
 
 	// elements is a static (not live) NodeList
 	// template root node must be prepended as well
-	let elements = [template, ...template.querySelectorAll(Statements.cssQuery)];
 	let repeat, repeaters = [];
-	elements.forEach(el => {
+	(template instanceof HTMLTemplateElement
+		? template.content.querySelectorAll(Statements.cssQuery)
+		: [template, ...template.querySelectorAll(Statements.cssQuery)]
+	).forEach(el => {
 		if (repeat) {
 			if (repeat.hasChild(el)) {
 				// Skip this element as it is handled by Statements.repeat

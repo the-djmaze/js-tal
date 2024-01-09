@@ -15,7 +15,7 @@ const proxyMap = new WeakMap();
 export function observeObject(obj, parent/*, deep*/)
 {
 	if (Array.isArray(obj)) {
-		return observeArrayObject(obj, parent/*, deep*/);
+		return observeArray(obj, parent/*, deep*/);
 	}
 	if (!isObject(obj)) {
 		return obj;
@@ -125,7 +125,7 @@ export function observeObject(obj, parent/*, deep*/)
 	return proxy;
 }
 
-export function observeArrayObject(obj, parent/*, deep*/)
+export function observeArray(obj, parent/*, deep*/)
 {
 //	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
 	if (!Array.isArray(obj)) {
