@@ -18,11 +18,12 @@ export function parse(template, context)
 
 	parse.converters.forEach(fn => fn(template, context));
 
-	// elements is a static (not live) NodeList
-	// template root node must be prepended as well
 	let skippers = [];
+	// querySelectorAll result is a static (not live) NodeList
+	// Using a live list we should use template.children
 	(template instanceof HTMLTemplateElement
 		? template.content.querySelectorAll(Statements.cssQuery)
+		// template root node must be prepended as well
 		: [template, ...template.querySelectorAll(Statements.cssQuery)]
 	).forEach(el => {
 		if (skippers.some(parent => parent.hasChild(el))) {

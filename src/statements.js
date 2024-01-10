@@ -88,11 +88,12 @@ export class Statements
 			text, getter = resolveTales(expression, context),
 			fn;
 		if (isFunction(getter)) {
+			let node = el.ownerDocument.createTextNode("");
+			el.replaceWith(node);
 			if ("structure" === match[1]) {
 				// Because the Element is replaced, it is gone
 				// So we prepend an empty TextNode as reference
-				let node = document.createTextNode(""), frag;
-				el.replaceWith(node);
+				let frag;
 				// Now we can put/replace the HTML after the empty TextNode
 				fn = string => {
 					frag && frag.forEach(el => el.remove());
@@ -102,8 +103,6 @@ export class Statements
 					node.after(template.content);
 				};
 			} else {
-				let node = document.createTextNode("");
-				el.replaceWith(node);
 				fn = string => node.nodeValue = string;
 			}
 			detectObservables();
@@ -144,25 +143,25 @@ export class Statements
 	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#condition-conditionally-insert-or-remove-an-element
 	 */
 	static condition(el, expression, context, parser) {
-		let tree = el.cloneNode(true),
+		let target = el.ownerDocument.createTextNode(""),
 			text, getter = resolveTales(expression, context),
-			fn = value => {
-				[...el.childNodes].forEach(removeNode);
-//				el.textContent = "";
+			node, fn = value => {
+				node && removeNode(node);
 				if (value) {
-					let node = tree.cloneNode(true);
+					node = el.cloneNode(true);
 					parser(node, context);
-					el.append(...node.childNodes);
+					target.after(node);
 				}
 			};
+		el.replaceWith(target);
 		if (getter) {
 			detectObservables();
 			text = getterValue(getter);
 			processDetectedObservables(el, () => fn(getterValue(getter)));
 		}
-		text || fn(text);
+		fn(text);
 		return {
-			hasChild: node => !text && el.contains(node)
+			hasChild: node => el.contains(node)
 		}
 	}
 
@@ -325,6 +324,7 @@ export class Statements
 			});
 		}
 	}
+
 }
 
 Statements.methods = Object.getOwnPropertyNames(Statements).filter(n => isFunction(Statements[n]));
