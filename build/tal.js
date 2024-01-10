@@ -552,11 +552,12 @@
 				text, getter = resolveTales(expression, context),
 				fn;
 			if (isFunction(getter)) {
+				let node = el.ownerDocument.createTextNode("");
+				el.replaceWith(node);
 				if ("structure" === match[1]) {
 					// Because the Element is replaced, it is gone
 					// So we prepend an empty TextNode as reference
-					let node = document.createTextNode(""), frag;
-					el.replaceWith(node);
+					let frag;
 					// Now we can put/replace the HTML after the empty TextNode
 					fn = string => {
 						frag && frag.forEach(el => el.remove());
@@ -566,8 +567,6 @@
 						node.after(template.content);
 					};
 				} else {
-					let node = document.createTextNode("");
-					el.replaceWith(node);
 					fn = string => node.nodeValue = string;
 				}
 				detectObservables();
@@ -608,25 +607,25 @@
 		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#condition-conditionally-insert-or-remove-an-element
 		 */
 		static condition(el, expression, context, parser) {
-			let tree = el.cloneNode(true),
+			let target = el.ownerDocument.createTextNode(""),
 				text, getter = resolveTales(expression, context),
-				fn = value => {
-					[...el.childNodes].forEach(removeNode);
-	//				el.textContent = "";
+				node, fn = value => {
+					node && removeNode(node);
 					if (value) {
-						let node = tree.cloneNode(true);
+						node = el.cloneNode(true);
 						parser(node, context);
-						el.append(...node.childNodes);
+						target.after(node);
 					}
 				};
+			el.replaceWith(target);
 			if (getter) {
 				detectObservables();
 				text = getterValue(getter);
 				processDetectedObservables(el, () => fn(getterValue(getter)));
 			}
-			text || fn(text);
+			fn(text);
 			return {
-				hasChild: node => !text && el.contains(node)
+				hasChild: node => el.contains(node)
 			}
 		}
 
@@ -789,6 +788,32 @@
 				});
 			}
 		}
+
+		/**
+		 * TODO: issue
+		 */
+		static with(el, expression, context, parser) {
+			let target = el.ownerDocument.createTextNode(""),
+				text, getter = resolveTales(expression, context),
+				node, fn = value => {
+					node && removeNode(node);
+					if (value) {
+						node = el.cloneNode(true);
+						parser(node, value);
+						target.after(node);
+					}
+				};
+			el.replaceWith(target);
+			if (getter) {
+				detectObservables();
+				getterValue(getter);
+				processDetectedObservables(el, () => fn(getterValue(getter)));
+			}
+			fn(text);
+			return {
+				hasChild: node => el.contains(node)
+			}
+		}
 	}
 
 	Statements.methods = Object.getOwnPropertyNames(Statements).filter(n => isFunction(Statements[n]));
@@ -812,11 +837,12 @@
 
 		parse.converters.forEach(fn => fn(template, context));
 
-		// elements is a static (not live) NodeList
-		// template root node must be prepended as well
 		let skippers = [];
+		// querySelectorAll result is a static (not live) NodeList
+		// Using a live list we should use template.children
 		(template instanceof HTMLTemplateElement
 			? template.content.querySelectorAll(Statements.cssQuery)
+			// template root node must be prepended as well
 			: [template, ...template.querySelectorAll(Statements.cssQuery)]
 		).forEach(el => {
 			if (skippers.some(parent => parent.hasChild(el))) {
@@ -836,8 +862,10 @@
 			}
 	*/
 
-			value = popAttribute(el, "tal:condition");
+			value = popAttribute(el, "tal:with");
 			if (null != value) {
+				skippers.push(Statements.with(el, value, context, parse));
+			} else if (null != (value = popAttribute(el, "tal:condition"))) {
 				skippers.push(Statements.condition(el, value, context, parse));
 			}
 

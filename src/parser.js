@@ -43,8 +43,10 @@ export function parse(template, context)
 		}
 */
 
-		value = popAttribute(el, "tal:condition");
+		value = popAttribute(el, "tal:with");
 		if (null != value) {
+			skippers.push(Statements.with(el, value, context, parse));
+		} else if (null != (value = popAttribute(el, "tal:condition"))) {
 			skippers.push(Statements.condition(el, value, context, parse));
 		}
 

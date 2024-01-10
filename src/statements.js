@@ -325,6 +325,28 @@ export class Statements
 		}
 	}
 
+	static with(el, expression, context, parser) {
+		let target = el.ownerDocument.createTextNode(""),
+			text, getter = resolveTales(expression, context),
+			node, fn = value => {
+				node && removeNode(node);
+				if (value) {
+					node = el.cloneNode(true);
+					parser(node, value);
+					target.after(node);
+				}
+			};
+		el.replaceWith(target);
+		if (getter) {
+			detectObservables();
+			getterValue(getter);
+			processDetectedObservables(el, () => fn(getterValue(getter)));
+		}
+		fn(text);
+		return {
+			hasChild: node => el.contains(node)
+		}
+	}
 }
 
 Statements.methods = Object.getOwnPropertyNames(Statements).filter(n => isFunction(Statements[n]));
