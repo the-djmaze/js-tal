@@ -1,7 +1,9 @@
-import { isFunction, isObject, isObserved, nullObject } from 'common';
+import { isFunction, nullObject } from 'common';
 import { Tales } from 'tales';
-import { observeObject, observeArray, detectObservables, getDetectedObservables } from 'observers/object';
-import { observePrimitive } from 'observers/primitive';
+import { isObserved, detectObservables, getDetectedObservables } from 'observers';
+import { observeObject } from 'observers/object';
+import { observeArray } from 'observers/array';
+import { observeType } from 'observers/type';
 
 /**
  * Used for garbage collection as Mutation Observers are not reliable
@@ -183,7 +185,7 @@ export class Statements
 			createItem = value => {
 				let node = el.cloneNode(true), subContext;
 				try {
-					value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
+					value = observeType(value);
 				} catch (e) {
 					console.error(e);
 				}

@@ -1,5 +1,7 @@
 import { parse } from 'parser';
-import { observeObject, observeArray } from 'observers/object';
+import { observeType } from 'observers/type';
+import { observeObject } from 'observers/object';
+import { observeArray } from 'observers/array';
 //import { observePrimitive } from 'observers/primitive';
 //import { observeProperty } from 'observers/property';
 import { TalError } from 'common';
@@ -52,6 +54,7 @@ function defineComputedProperty(obj, prop, fn, observables)
 
 window.TAL = {
 	parse,
+	observe: observeType,
 	observeObject,
 	observeArray,
 //	observePrimitive,

@@ -1,5 +1,6 @@
 import { Statements } from 'statements';
-import { popAttribute, isObserved, TalError } from 'common';
+import { popAttribute, TalError } from 'common';
+import { isObserved } from 'observers';
 
 // context = observeObject(obj)
 // TalContext

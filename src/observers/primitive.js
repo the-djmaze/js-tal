@@ -1,4 +1,5 @@
-import { isFunction, nullObject, IS_PROXY, TalError } from 'common';
+import { isFunction, nullObject, TalError } from 'common';
+import { IS_PROXY } from 'observers';
 
 export function observePrimitive(prim, parent/*, deep*/)
 {
@@ -18,7 +19,7 @@ export function observePrimitive(prim, parent/*, deep*/)
 	}
 
 	if (!parent || !parent[IS_PROXY]) {
-		parent = undefined;
+		parent = null;
 	}
 
 	const obj = nullObject();

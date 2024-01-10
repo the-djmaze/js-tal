@@ -19,6 +19,7 @@ module.exports = {
 		es2020: true
 	},
 	globals: {
+		'TAL': "readonly"
 	},
 	// http://eslint.org/docs/rules/
 	rules: {

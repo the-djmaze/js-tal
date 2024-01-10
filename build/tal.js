@@ -4,25 +4,7 @@
 	const
 		isFunction = val => typeof val === "function",
 		isObject = val => typeof val === "object",
-		IS_PROXY = Symbol("proxied"),
 		nullObject = () => Object.create(null),
-
-		// Vue trigger
-		dispatch = (callbacks, prop, value) =>
-		{
-			try {
-				callbacks && callbacks.forEach(cb => cb(value, prop));
-				return true;
-			} catch (e) {
-				console.dir({
-					prop: prop,
-					value: value,
-					callbacks:callbacks
-				});
-				console.error(e);
-				return false;
-			}
-		},
 
 		popAttribute = (el, name) =>
 		{
@@ -30,6 +12,14 @@
 			el.removeAttribute(name);
 			return value;
 		};
+
+	class TalError extends Error {}
+
+	class ObservablesMap extends WeakMap {
+	    get(obj) {
+			return obj[IS_PROXY] ? obj : super.get();
+	    }
+	}
 
 	class Observers extends Map {
 
@@ -53,38 +43,99 @@
 		}
 	}
 
-	class TalError extends Error {}
-
-	function isObserved(obj)
-	{
-		return isObject(obj) && obj[IS_PROXY];
-	}
-
 	let detectingObservables;
+
 	const
+		IS_PROXY = Symbol("proxied"),
+
+		isContextProp = prop => contextProps.includes(prop),
+
+		isObserved = obj => obj[IS_PROXY],
+
 		detectObservables = () => {
 			detectingObservables || (detectingObservables = []);
 		},
+
 		getDetectedObservables = () => {
 			let result = detectingObservables;
 			detectingObservables = null;
 			return result;
+		},
+
+		observablesMap = new ObservablesMap(),
+
+		contextGetter = (context, target, prop, observers, parent) => {
+			switch (prop)
+			{
+				case IS_PROXY: return 1;
+				// Vue watch(), Knockout subscribe()
+				case "observe":
+	//				callback(obj[property], property);
+					// fallthrough
+				case "unobserve":
+	//				return (property, callback) => observers[prop](property, callback);
+					return observers[prop].bind(observers);
+				case "clearObservers":
+					return () => observers.clear();
+				case "getObservers":
+					return () => observers;
+				case "refreshObservers":
+					return () => observers.dispatchAll(target);
+				// Vue computed(), Knockout computed()
+				case "defineComputed":
+					return (name, callable) => {
+						detectObservables();
+						callable();
+						getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, callable));
+						Object.defineProperty(target, name, { get: callable });
+					};
+				/**
+				 * TAL built-in Names
+				 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
+				 */
+				case "root":
+					return parent ? parent[prop] : context;
+	//				return (parent && parent[IS_PROXY]) ? parent[prop] : context;
+				case "context":
+					return context;
+			}
 		};
 
-	const proxyMap = new WeakMap();
+	const contextProps = [
+			IS_PROXY,
+			"observe",
+			"unobserve",
+			"clearObservers",
+			"getObservers",
+			"refreshObservers",
+			"defineComputed",
+			// TAL
+			"root",
+			"context"
+		],
+		// Vue trigger
+		dispatch = (callbacks, prop, value) => {
+			try {
+				callbacks && callbacks.forEach(cb => cb(value, prop));
+				return true;
+			} catch (e) {
+				console.dir({
+					prop: prop,
+					value: value,
+					callbacks:callbacks
+				});
+				console.error(e);
+				return false;
+			}
+		};
+
 	function observeObject(obj, parent/*, deep*/)
 	{
-		if (Array.isArray(obj)) {
-			return observeArray(obj, parent/*, deep*/);
-		}
 		if (!isObject(obj)) {
 			return obj;
 		}
-		if (obj[IS_PROXY]) {
-			return obj;
-		}
 
-		let proxy = proxyMap.get(obj);
+		let proxy = observablesMap.get(obj);
 		if (!proxy) {
 	/*
 			// If deep doesn't evaluate to true, only a shallow proxy is created
@@ -101,43 +152,14 @@
 				});
 		}
 	*/
-	//		Object.defineProperty(obj, 'isProxy', { get: function(){return this === obj;} });
 			if (!parent || !parent[IS_PROXY]) {
-				parent = undefined;
+				parent = null;
 			}
 			const observers = new Observers;
 			proxy = new Proxy(obj, {
 				get(target, prop, receiver) {
-					switch (prop)
-					{
-						case IS_PROXY: return 1;
-						// Vue watch(), Knockout subscribe()
-						case "observe":
-	//						callback(obj[property], property);
-							// fallthrough
-						case "unobserve":
-	//						return (property, callback) => observers[prop](property, callback);
-							return observers[prop].bind(observers);
-						case "clearObservers":
-							return () => observers.clear();
-						case "refreshObservers":
-							return () => observers.dispatchAll(obj);
-						// Vue computed(), Knockout computed()
-						case "defineComputed":
-							return (name, fn) => {
-								detectObservables();
-								fn();
-								getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
-								Object.defineProperty(obj, name, { get: fn });
-							};
-						/**
-						 * TAL built-in Names
-						 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
-						 */
-						case "root":
-							return parent ? parent[prop] : proxy;
-						case "context":
-							return proxy;
+					if (isContextProp(prop)) {
+						return contextGetter(proxy, target, prop, observers, parent);
 					}
 					if (Reflect.has(target, prop)) {
 						if (detectingObservables) {
@@ -157,156 +179,24 @@
 					}
 				},
 				set(target, prop, value, receiver) {
-					if (detectingObservables) {
-						return true;
-					}
-					switch (prop)
-					{
-						case "observe":
-						case "unobserve":
-						case "clearObservers":
-						case "refreshObservers":
-						case "defineComputed":
-						case "root":
-						case "context":
+					let result = true;
+					if (!detectingObservables) {
+						if (isContextProp(prop)) {
 							throw new TalError(`${prop} can't be initialized, it is internal`);
-
-					}
-					let oldValue = target[prop],
-						result = Reflect.set(target, prop, value, receiver);
-					if (result && oldValue !== target[prop]) {
-						observers.dispatch(prop, target[prop]);
+						}
+						let oldValue = Reflect.get(target, prop, receiver);
+						if (oldValue !== value) {
+							result = Reflect.set(target, prop, value, receiver);
+							value = Reflect.get(target, prop, receiver);
+							if (result && oldValue !== value) {
+								observers.dispatch(prop, value);
+							}
+						}
 					}
 					return result;
 				}
 			});
-			proxyMap.set(obj, proxy);
-		}
-		return proxy;
-	}
-
-	function observeArray(obj, parent/*, deep*/)
-	{
-	//	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
-		if (!Array.isArray(obj)) {
-			throw new TalError("Not an Array");
-		}
-		if (obj[IS_PROXY]) {
-			return obj;
-		}
-		let proxy = proxyMap.get(obj);
-		if (!proxy) {
-			if (!parent || !parent[IS_PROXY]) {
-				parent = undefined;
-			}
-			const observers = new Observers;
-			proxy = new Proxy(obj, {
-				get(target, prop, receiver) {
-					switch (prop)
-					{
-						case IS_PROXY: return 1;
-						// Vue watch(), Knockout subscribe()
-						case "observe":
-	//						callback(obj[property], property);
-							// fallthrough
-						case "unobserve":
-	//						return (property, callback) => observers[prop](property, callback);
-							return observers[prop].bind(observers);
-						case "clearObservers":
-							return () => observers.clear();
-						case "refreshObservers":
-							return () => observers.dispatchAll(obj);
-						// Vue computed(), Knockout computed()
-						case "defineComputed":
-							return (name, fn) => {
-								detectObservables();
-								fn();
-								getDetectedObservables().forEach(([obj, prop]) => obj.observe(prop, fn));
-								Object.defineProperty(obj, name, { get: fn });
-							};
-						/**
-						* TAL built-in Names
-						* https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
-						*/
-						case "root":
-							return parent ? parent[prop] : proxy;
-						case "context":
-							return proxy;
-					}
-					if (Reflect.has(target, prop)) {
-						switch (prop)
-						{
-						// Set
-						case "clear":
-							return () => {
-								observers.dispatch(prop);
-								return target.clear();
-							};
-						case "add":
-						case "delete":
-							throw new TalError("Set.prototype."+prop+"() not supported");
-						// Array mutator methods
-						case "copyWithin":
-						case "fill":
-						case "reverse":
-						case "sort":
-							throw new TalError("Array.prototype."+prop+"() not supported");
-						case "shift":
-	//					case "pop":
-							return () => {
-								let value = target[prop]();
-								observers.dispatch(prop, value);
-								return value;
-							};
-						case "unshift":
-						case "splice":
-						case "push":
-							return (...args) => {
-								args = args.map(obj => observeObject(obj, proxy));
-								let result = target[prop](...args);
-								observers.dispatch(prop, args);
-								return result;
-							};
-						}
-						if (detectingObservables) {
-							detectingObservables.push([proxy, prop]);
-						}
-						let result = Reflect.get(target, prop, receiver);
-						if (isFunction(result)) {
-							result = result.bind(proxy);
-						}
-						return result;
-	//					let value = Reflect.get(target, prop, receiver);
-	//					return isFunction(value) ? value.bind(target) : value;
-					}
-					if (typeof prop !== 'symbol') {
-						if (parent) {
-							return parent[prop];
-						}
-						console.error(`Undefined property '${prop}' in current scope`);
-					}
-				},
-				set(target, prop, value) {
-					if (detectingObservables) {
-						return true;
-					}
-					if (target[prop] !== value) {
-						target[prop] = value;
-						if ("length" === prop) {
-							observers.dispatch(prop, value);
-						} else if (isFinite(prop)) {
-							value = observeObject(value, proxy);
-							observers.dispatch("set", {index:prop, value});
-						}
-						target[prop] = value;
-					}
-					return true;
-				}
-			});
-
-			obj.forEach((item, index) => obj[index] = observeObject(item, proxy));
-
-			proxyMap.set(obj, proxy);
+			observablesMap.set(obj, proxy);
 		}
 		return proxy;
 	}
@@ -411,6 +301,84 @@
 		}
 	}
 
+	function observeArray(obj, parent/*, deep*/)
+	{
+	//	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
+		if (!Array.isArray(obj)) {
+			throw new TalError("Not an Array");
+		}
+		let proxy = observablesMap.get(obj);
+		if (!proxy) {
+			if (!parent || !parent[IS_PROXY]) {
+				parent = null;
+			}
+			obj = observeObject(obj);
+			proxy = new Proxy(obj, {
+				get(target, prop, receiver) {
+					switch (prop)
+					{
+					// Set
+					case "clear":
+						return () => {
+							target.getObservers().dispatch(prop);
+							return target.clear();
+						};
+					case "add":
+					case "delete":
+						throw new TalError("Set.prototype."+prop+"() not supported");
+					// Array mutator methods
+					case "copyWithin":
+					case "fill":
+					case "reverse":
+					case "sort":
+						throw new TalError("Array.prototype."+prop+"() not supported");
+					case "shift":
+	//					case "pop":
+						return () => {
+							let value = target[prop]();
+							target.getObservers().dispatch(prop, value);
+							return value;
+						};
+					case "unshift":
+					case "splice":
+					case "push":
+						return (...args) => {
+							args = args.map(target => observeObject(target, proxy));
+							let result = target[prop](...args);
+							target.getObservers().dispatch(prop, args);
+							return result;
+						};
+					}
+					return Reflect.get(target, prop, receiver);
+				},
+				set(target, prop, value, receiver) {
+					let result = true;
+					if (!detectingObservables) {
+						if (isFinite(prop)) {
+							value = observeObject(value, proxy);
+							let oldValue = Reflect.get(target, prop, receiver);
+							if (oldValue !== value) {
+								result = Reflect.set(target, prop, value, receiver);
+								value = Reflect.get(target, prop, receiver);
+								if (result && oldValue !== value) {
+									target.getObservers().dispatch("set", {index:prop, value});
+								}
+							}
+						} else {
+							target.getObservers().dispatch(prop, value);
+						}
+					}
+					return result;
+				}
+			});
+
+			obj.forEach((item, index) => obj[index] = observeObject(item, proxy));
+
+			observablesMap.set(obj, proxy);
+		}
+		return proxy;
+	}
+
 	function observePrimitive(prim, parent/*, deep*/)
 	{
 		if (prim[IS_PROXY]) {
@@ -429,7 +397,7 @@
 		}
 
 		if (!parent || !parent[IS_PROXY]) {
-			parent = undefined;
+			parent = null;
 		}
 
 		const obj = nullObject();
@@ -465,6 +433,118 @@
 		});
 
 		return proxy;
+	}
+
+	function observeFunction(fn, parent)
+	{
+		if (!isFunction(fn)) {
+			throw new TalError("Not a Function");
+		}
+		let proxy = observablesMap.get(fn);
+		if (!proxy) {
+			if (!parent || !parent[IS_PROXY]) {
+				parent = null;
+			}
+			const observers = new Observers;
+			proxy = new Proxy(fn, {
+				get(target, prop, receiver) {
+					if (isContextProp(prop)) {
+						return contextGetter(proxy, target, prop, observers, parent);
+					}
+					return Reflect.get(target, prop, receiver);
+				},
+				has(target, prop) {
+					return isContextProp(prop) || Reflect.has(target, prop);
+					// || (parent && prop in parent)
+				},
+				set(target, prop, value, receiver) {
+					if (detectingObservables) {
+						return true;
+					}
+					if (isContextProp(prop)) {
+						throw new TalError(`${prop} can't be initialized, it is internal`);
+					}
+					let oldValue = Reflect.get(target, prop, receiver),
+						result = Reflect.set(target, prop, value, receiver);
+					value = Reflect.get(target, prop, receiver);
+					if (result && oldValue !== value) {
+						observers.dispatch(prop, value);
+					}
+					return result;
+				},
+				apply(target, thisArg, argumentsList) {
+					return Reflect.apply(target, thisArg, argumentsList);
+				}
+			});
+			observablesMap.set(fn, proxy);
+		}
+		return proxy;
+	/*
+				// A trap for the new operator.
+				construct() {
+				},
+				// A trap for Object.defineProperty.
+				defineProperty() {
+				},
+				// A trap for the delete operator.
+				deleteProperty() {
+				},
+				// A trap for Object.getOwnPropertyDescriptor.
+				getOwnPropertyDescriptor() {
+				},
+				// A trap for Object.getPrototypeOf.
+				getPrototypeOf() {
+				},
+				// A trap for the in operator.
+				has() {
+				},
+				// A trap for Object.isExtensible.
+				isExtensible() {
+				},
+				// A trap for Object.getOwnPropertyNames and Object.getOwnPropertySymbols.
+				ownKeys() {
+				},
+				// A trap for Object.preventExtensions.
+				preventExtensions() {
+				},
+				// A trap for Object.setPrototypeOf.
+				setPrototypeOf() {
+				},
+	*/
+	}
+
+	function observeType(item, parent/*, deep*/)
+	{
+		let type = (null != item) ? typeof item : "null";
+		switch (type)
+		{
+		// primitives
+		case "undefined":
+		case "null":
+		case "bigint":
+		case "boolean":
+		case "number":
+		case "string":
+		case "symbol":
+			return observePrimitive(item, parent/*, deep*/);
+		}
+
+		let observable = observablesMap.get(item);
+		if (observable) {
+			return observable;
+		}
+
+		if ("function" === type) {
+			observable = observeFunction(item, parent/*, deep*/);
+		} else if (Array.isArray(item)) {
+			observable = observeArray(item, parent/*, deep*/);
+		} else if ("object" === type) {
+			observable = observeObject(item, parent/*, deep*/);
+		}
+
+		observablesMap.set(item, observable);
+
+		return observable;
 	}
 
 	/**
@@ -647,7 +727,7 @@
 				createItem = value => {
 					let node = el.cloneNode(true), subContext;
 					try {
-						value = isObject(value) ? observeObject(value, context) : observePrimitive(value, context);
+						value = observeType(value);
 					} catch (e) {
 						console.error(e);
 					}
@@ -789,9 +869,6 @@
 			}
 		}
 
-		/**
-		 * TODO: issue
-		 */
 		static with(el, expression, context, parser) {
 			let target = el.ownerDocument.createTextNode(""),
 				text, getter = resolveTales(expression, context),
@@ -973,6 +1050,7 @@
 
 	window.TAL = {
 		parse,
+		observe: observeType,
 		observeObject,
 		observeArray,
 	//	observePrimitive,

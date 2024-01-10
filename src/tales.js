@@ -1,5 +1,6 @@
+import { isFunction, TalError } from 'common';
+import { isObserved } from 'observers';
 import { observeObject } from 'observers/object';
-import { isFunction, isObserved, TalError } from 'common';
 
 /**
  * This can be very complex, like:
