@@ -1,7 +1,5 @@
 import { TalError } from 'common';
-import {
-	observablesMap, detectingObservables, IS_PROXY
-} from 'observers';
+import { observablesMap, detectingObservables } from 'observers';
 import { observeObject } from 'observers/object';
 
 export function observeArray(obj, parent/*, deep*/)
@@ -12,10 +10,7 @@ export function observeArray(obj, parent/*, deep*/)
 	}
 	let proxy = observablesMap.get(obj);
 	if (!proxy) {
-		if (!parent || !parent[IS_PROXY]) {
-			parent = null;
-		}
-		obj = observeObject(obj);
+		obj = observeObject(obj, parent);
 		proxy = new Proxy(obj, {
 			get(target, prop, receiver) {
 				switch (prop)

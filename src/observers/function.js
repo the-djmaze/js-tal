@@ -2,7 +2,7 @@ import { isFunction, TalError } from 'common';
 //import { observeDOMNode } from 'observers/dom';
 import {
 	observablesMap, detectingObservables,
-	IS_PROXY, Observers, isContextProp, contextGetter
+	OBSERVABLE, Observers, isContextProp, contextGetter
 } from 'observers';
 
 export function observeFunction(fn, parent)
@@ -12,7 +12,7 @@ export function observeFunction(fn, parent)
 	}
 	let proxy = observablesMap.get(fn);
 	if (!proxy) {
-		if (!parent || !parent[IS_PROXY]) {
+		if (!parent || !parent[OBSERVABLE]) {
 			parent = null;
 		}
 		const observers = new Observers;
@@ -44,41 +44,12 @@ export function observeFunction(fn, parent)
 			},
 			apply(target, thisArg, argumentsList) {
 				return Reflect.apply(target, thisArg, argumentsList);
+			},
+			deleteProperty(target, prop) {
+				Reflect.has(target, prop) && observers.delete(prop);
 			}
 		});
 		observablesMap.set(fn, proxy);
 	}
 	return proxy;
-/*
-			// A trap for the new operator.
-			construct() {
-			},
-			// A trap for Object.defineProperty.
-			defineProperty() {
-			},
-			// A trap for the delete operator.
-			deleteProperty() {
-			},
-			// A trap for Object.getOwnPropertyDescriptor.
-			getOwnPropertyDescriptor() {
-			},
-			// A trap for Object.getPrototypeOf.
-			getPrototypeOf() {
-			},
-			// A trap for the in operator.
-			has() {
-			},
-			// A trap for Object.isExtensible.
-			isExtensible() {
-			},
-			// A trap for Object.getOwnPropertyNames and Object.getOwnPropertySymbols.
-			ownKeys() {
-			},
-			// A trap for Object.preventExtensions.
-			preventExtensions() {
-			},
-			// A trap for Object.setPrototypeOf.
-			setPrototypeOf() {
-			},
-*/
 }

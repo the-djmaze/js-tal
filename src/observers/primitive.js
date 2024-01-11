@@ -1,9 +1,9 @@
 import { isFunction, nullObject, TalError } from 'common';
-import { IS_PROXY } from 'observers';
+import { OBSERVABLE } from 'observers';
 
 export function observePrimitive(prim, parent/*, deep*/)
 {
-	if (prim[IS_PROXY]) {
+	if (prim[OBSERVABLE]) {
 		return prim;
 	}
 
@@ -18,7 +18,7 @@ export function observePrimitive(prim, parent/*, deep*/)
 		throw new TalError("Not a primitive");
 	}
 
-	if (!parent || !parent[IS_PROXY]) {
+	if (!parent || !parent[OBSERVABLE]) {
 		parent = null;
 	}
 
@@ -29,15 +29,13 @@ export function observePrimitive(prim, parent/*, deep*/)
 		get(target, prop) {
 			switch (prop)
 			{
-				case IS_PROXY: return 1;
-				/**
-				* TAL built-in Names
-				* https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
-				*/
-				case "root":
-					return parent ? parent[prop] : proxy;
+				case OBSERVABLE: return 1;
 				case "context":
-					return proxy;
+					return context;
+				case "parent":
+					return parent;
+				case "root":
+					return parent ? parent[prop] : context;
 			}
 			const prim = Reflect.get(target, 'value');
 			const value = prim[prop];

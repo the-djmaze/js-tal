@@ -1,7 +1,7 @@
 
 class ObservablesMap extends WeakMap {
     get(obj) {
-		return obj[IS_PROXY] ? obj : super.get();
+		return obj[OBSERVABLE] ? obj : super.get(obj);
     }
 }
 
@@ -30,11 +30,11 @@ export class Observers extends Map {
 export let detectingObservables;
 
 export const
-	IS_PROXY = Symbol("proxied"),
+	OBSERVABLE = Symbol("observable"),
 
 	isContextProp = prop => contextProps.includes(prop),
 
-	isObserved = obj => obj[IS_PROXY],
+	isObserved = obj => obj[OBSERVABLE],
 
 	detectObservables = () => {
 		detectingObservables || (detectingObservables = []);
@@ -48,10 +48,10 @@ export const
 
 	observablesMap = new ObservablesMap(),
 
-	contextGetter = (context, target, prop, observers, parent) => {
+	contextGetter = (proxy, target, prop, observers, parent) => {
 		switch (prop)
 		{
-			case IS_PROXY: return 1;
+			case OBSERVABLE: return 1;
 			// Vue watch(), Knockout subscribe()
 			case "observe":
 //				callback(obj[property], property);
@@ -77,16 +77,18 @@ export const
 			 * TAL built-in Names
 			 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
 			 */
-			case "root":
-				return parent ? parent[prop] : context;
-//				return (parent && parent[IS_PROXY]) ? parent[prop] : context;
 			case "context":
-				return context;
+				return proxy;
+			case "parent":
+				return parent;
+			case "root":
+				return parent ? parent[prop] : proxy;
+//				return (parent && parent[OBSERVABLE]) ? parent[prop] : proxy;
 		}
 	};
 
 const contextProps = [
-		IS_PROXY,
+		OBSERVABLE,
 		"observe",
 		"unobserve",
 		"clearObservers",
@@ -94,8 +96,9 @@ const contextProps = [
 		"refreshObservers",
 		"defineComputed",
 		// TAL
-		"root",
-		"context"
+		"context",
+		"parent",
+		"root"
 	],
 	// Vue trigger
 	dispatch = (callbacks, prop, value) => {

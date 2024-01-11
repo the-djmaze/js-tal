@@ -1,7 +1,7 @@
 import { isObject, isFunction, TalError } from 'common';
 import {
 	observablesMap, detectingObservables,
-	IS_PROXY, Observers, isContextProp, contextGetter
+	OBSERVABLE, Observers, isContextProp, contextGetter
 } from 'observers';
 
 export function observeObject(obj, parent/*, deep*/)
@@ -27,31 +27,36 @@ export function observeObject(obj, parent/*, deep*/)
 			});
 	}
 */
-		if (!parent || !parent[IS_PROXY]) {
+		if (!parent || !parent[OBSERVABLE]) {
 			parent = null;
 		}
 		const observers = new Observers;
 		proxy = new Proxy(obj, {
 			get(target, prop, receiver) {
-				if (isContextProp(prop)) {
-					return contextGetter(proxy, target, prop, observers, parent);
-				}
-				if (Reflect.has(target, prop)) {
-					if (detectingObservables) {
-						detectingObservables.push([proxy, prop]);
+				let result = contextGetter(proxy, target, prop, observers, parent);
+				if (undefined === result) {
+					if (Reflect.has(target, prop)) {
+						if (detectingObservables) {
+							detectingObservables.push([proxy, prop]);
+						}
+						result = Reflect.get(target, prop, receiver);
+						if (isFunction(result)) {
+							result = result.bind(proxy);
+						}
 					}
-					let result = Reflect.get(target, prop, receiver);
-					if (isFunction(result)) {
-						result = result.bind(proxy);
+					if (typeof prop !== 'symbol') {
+						if (parent) {
+							result = parent[prop];
+						} else {
+							console.error(`Undefined property '${prop}' in current scope`);
+						}
 					}
-					return result;
 				}
-				if (typeof prop !== 'symbol') {
-					if (parent) {
-						return parent[prop];
-					}
-					console.error(`Undefined property '${prop}' in current scope`);
-				}
+				return result;
+			},
+			has(target, prop) {
+				return isContextProp(prop) || Reflect.has(target, prop);
+				// || (parent && prop in parent)
 			},
 			set(target, prop, value, receiver) {
 				let result = true;
@@ -69,6 +74,9 @@ export function observeObject(obj, parent/*, deep*/)
 					}
 				}
 				return result;
+			},
+			deleteProperty(target, prop) {
+				Reflect.has(target, prop) && observers.delete(prop);
 			}
 		});
 		observablesMap.set(obj, proxy);
