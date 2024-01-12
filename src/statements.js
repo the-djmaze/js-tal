@@ -1,6 +1,6 @@
 import { isFunction, nullObject } from 'common';
 import { Tales } from 'tales';
-import { isObserved, detectObservables, getDetectedObservables } from 'observers';
+import { isObservable, detectObservables, getDetectedObservables } from 'observers';
 import { observeObject } from 'observers/object';
 import { observeArray } from 'observers/array';
 import { observeType } from 'observers/type';
@@ -70,14 +70,11 @@ export class Statements
 	static content(el, value, context) {
 		let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
 			expression = match[2],
-			text, getter = resolveTales(expression, context),
+			getter = resolveTales(expression, context),
 			mode = "structure" === match[1] ? "innerHTML" : "textContent";
-		if (getter) {
-			detectObservables();
-			text = getterValue(getter);
-			processDetectedObservables(el, () => el[mode] = getterValue(getter));
-		}
-		el[mode] = text;
+		detectObservables();
+		el[mode] = getterValue(getter);
+		processDetectedObservables(el, () => el[mode] = getterValue(getter));
 	}
 
 	/**
@@ -110,10 +107,13 @@ export class Statements
 			detectObservables();
 			text = getterValue(getter);
 			processDetectedObservables(el, () => fn(getterValue(getter)));
-		} else if ("structure" === match[1]) {
-			fn = string => el.outerHTML = string;
 		} else {
-			fn = string => el.replaceWith(string);
+			text = getterValue(getter);
+			if ("structure" === match[1]) {
+				fn = string => el.outerHTML = string;
+			} else {
+				fn = string => el.replaceWith(string);
+			}
 		}
 		fn(text);
 	}
@@ -185,11 +185,11 @@ export class Statements
 			createItem = value => {
 				let node = el.cloneNode(true), subContext;
 				try {
-					value = observeType(value);
+					value = observeType(value, context);
 				} catch (e) {
 					console.error(e);
 				}
-				if ('context' == match[1] && isObserved(value)) {
+				if ('$data' == match[1] && isObservable(value)) {
 					subContext = value;
 				} else {
 					subContext = observeObject(nullObject(), context);
@@ -223,7 +223,7 @@ export class Statements
 		let getter = Tales.path(match[2], context);
 		let array = getter ? getterValue(getter) : null;
 		if (array) {
-			if (!isObserved(array)) {
+			if (!isObservable(array)) {
 				array = observeArray(array, context);
 				getter.context[getter.prop] = array;
 			}

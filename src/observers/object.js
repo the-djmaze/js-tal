@@ -27,8 +27,11 @@ export function observeObject(obj, parent/*, deep*/)
 			});
 	}
 */
-		if (!parent || !parent[OBSERVABLE]) {
+		if (!parent) {
 			parent = null;
+		} else if (!parent[OBSERVABLE]) {
+			console.dir({parent});
+			throw new TalError('parent is not observable');
 		}
 		const observers = new Observers;
 		proxy = new Proxy(obj, {
@@ -36,19 +39,18 @@ export function observeObject(obj, parent/*, deep*/)
 				let result = contextGetter(proxy, target, prop, observers, parent);
 				if (undefined === result) {
 					if (Reflect.has(target, prop)) {
-						if (detectingObservables) {
-							detectingObservables.push([proxy, prop]);
-						}
 						result = Reflect.get(target, prop, receiver);
 						if (isFunction(result)) {
 							result = result.bind(proxy);
+						} else if (detectingObservables) {
+							detectingObservables.push([proxy, prop]);
 						}
-					}
-					if (typeof prop !== 'symbol') {
+					} else if (typeof prop !== 'symbol') {
 						if (parent) {
+//							console.log(`Undefined property '${prop}' in current observeObject, lookup parent`, {target,parent});
 							result = parent[prop];
 						} else {
-							console.error(`Undefined property '${prop}' in current scope`);
+							console.error(`Undefined property '${prop}' in current observeObject`, {target,parent});
 						}
 					}
 				}
@@ -77,6 +79,7 @@ export function observeObject(obj, parent/*, deep*/)
 			},
 			deleteProperty(target, prop) {
 				Reflect.has(target, prop) && observers.delete(prop);
+				return Reflect.deleteProperty(target, prop);
 			}
 		});
 		observablesMap.set(obj, proxy);

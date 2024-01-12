@@ -1,19 +1,8 @@
 import { observablesMap } from 'observers';
 import { observeObject } from 'observers/object';
 import { observeArray } from 'observers/array';
-import { observePrimitive } from 'observers/primitive';
+//import { observePrimitive } from 'observers/primitive';
 import { observeFunction } from 'observers/function';
-
-let detectingObservables;
-export const
-	detectObservables = () => {
-		detectingObservables || (detectingObservables = []);
-	},
-	getDetectedObservables = () => {
-		let result = detectingObservables;
-		detectingObservables = null;
-		return result;
-	};
 
 export function observeType(item, parent/*, deep*/)
 {
@@ -28,7 +17,8 @@ export function observeType(item, parent/*, deep*/)
 	case "number":
 	case "string":
 	case "symbol":
-		return observePrimitive(item, parent/*, deep*/);
+		return item;
+//		return observePrimitive(item, parent/*, deep*/);
 	}
 
 	let observable = observablesMap.get(item);

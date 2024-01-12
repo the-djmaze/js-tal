@@ -34,7 +34,7 @@ export const
 
 	isContextProp = prop => contextProps.includes(prop),
 
-	isObserved = obj => obj[OBSERVABLE],
+	isObservable = obj => obj && obj[OBSERVABLE],
 
 	detectObservables = () => {
 		detectingObservables || (detectingObservables = []);

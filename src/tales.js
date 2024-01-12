@@ -1,5 +1,5 @@
 import { isFunction, TalError } from 'common';
-import { isObserved } from 'observers';
+import { isObservable } from 'observers';
 import { observeObject } from 'observers/object';
 
 /**
@@ -48,19 +48,19 @@ export class Tales
 	static path(expr, context, writer) {
 		let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
 		if (match) {
-			if (!isObserved(context)) {
+			if (!isObservable(context)) {
 				throw new TalError(`context '${expr}' can't be observed`);
 			}
 			match = match[1].trim().split("/");
 			let i = 0, l = match.length - 1;
 			for (; i < l; ++i) {
 				if (!(match[i] in context)) {
-					console.error(`Path '${expr}' part '${match[i]}' not found`, context);
+					console.error(`Path '${expr}' part ${i} not found`, context);
 					return;
 				}
 				let newContext = context[match[i]];
-				if (!isObserved(newContext)) {
-					newContext = observeObject(newContext, context[match[i]]);
+				if (!isObservable(newContext)) {
+					newContext = observeObject(newContext, context);
 					try {
 						context[match[i]] = newContext;
 					} catch (e) {

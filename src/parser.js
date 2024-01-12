@@ -1,6 +1,6 @@
 import { Statements } from 'statements';
 import { popAttribute, TalError } from 'common';
-import { isObserved } from 'observers';
+import { isObservable } from 'observers';
 
 // context = observeObject(obj)
 // TalContext
@@ -12,7 +12,7 @@ export function parse(template, context)
 	if (!(template instanceof Element)) {
 		throw new TalError("template not an instance of Element");
 	}
-	if (!isObserved(context)) {
+	if (!isObservable(context)) {
 		throw new TalError("context is not observed");
 	}
 //	context = observeObject(context);

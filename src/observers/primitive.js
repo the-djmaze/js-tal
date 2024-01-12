@@ -18,8 +18,11 @@ export function observePrimitive(prim, parent/*, deep*/)
 		throw new TalError("Not a primitive");
 	}
 
-	if (!parent || !parent[OBSERVABLE]) {
+	if (!parent) {
 		parent = null;
+	} else if (!parent[OBSERVABLE]) {
+		console.dir({parent});
+		throw new TalError('parent is not observable');
 	}
 
 	const obj = nullObject();
@@ -46,7 +49,7 @@ export function observePrimitive(prim, parent/*, deep*/)
 				if (parent) {
 					return parent[prop];
 				}
-				console.error(`Undefined property '${prop}' in current scope`);
+				console.error(`Undefined property '${prop}' in current observePrimitive`, {target, parent});
 			}
 
 		}

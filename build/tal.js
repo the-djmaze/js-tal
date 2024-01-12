@@ -17,7 +17,7 @@
 
 	class ObservablesMap extends WeakMap {
 	    get(obj) {
-			return obj[IS_PROXY] ? obj : super.get();
+			return obj[OBSERVABLE] ? obj : super.get(obj);
 	    }
 	}
 
@@ -46,11 +46,11 @@
 	let detectingObservables;
 
 	const
-		IS_PROXY = Symbol("proxied"),
+		OBSERVABLE = Symbol("observable"),
 
 		isContextProp = prop => contextProps.includes(prop),
 
-		isObserved = obj => obj[IS_PROXY],
+		isObservable = obj => obj && obj[OBSERVABLE],
 
 		detectObservables = () => {
 			detectingObservables || (detectingObservables = []);
@@ -64,10 +64,10 @@
 
 		observablesMap = new ObservablesMap(),
 
-		contextGetter = (context, target, prop, observers, parent) => {
+		contextGetter = (proxy, target, prop, observers, parent) => {
 			switch (prop)
 			{
-				case IS_PROXY: return 1;
+				case OBSERVABLE: return 1;
 				// Vue watch(), Knockout subscribe()
 				case "observe":
 	//				callback(obj[property], property);
@@ -93,16 +93,18 @@
 				 * TAL built-in Names
 				 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
 				 */
-				case "root":
-					return parent ? parent[prop] : context;
-	//				return (parent && parent[IS_PROXY]) ? parent[prop] : context;
 				case "context":
-					return context;
+					return proxy;
+				case "parent":
+					return parent;
+				case "root":
+					return parent ? parent[prop] : proxy;
+	//				return (parent && parent[OBSERVABLE]) ? parent[prop] : proxy;
 			}
 		};
 
 	const contextProps = [
-			IS_PROXY,
+			OBSERVABLE,
 			"observe",
 			"unobserve",
 			"clearObservers",
@@ -110,8 +112,9 @@
 			"refreshObservers",
 			"defineComputed",
 			// TAL
-			"root",
-			"context"
+			"context",
+			"parent",
+			"root"
 		],
 		// Vue trigger
 		dispatch = (callbacks, prop, value) => {
@@ -152,31 +155,38 @@
 				});
 		}
 	*/
-			if (!parent || !parent[IS_PROXY]) {
+			if (!parent) {
 				parent = null;
+			} else if (!parent[OBSERVABLE]) {
+				console.dir({parent});
+				throw new TalError('parent is not observable');
 			}
 			const observers = new Observers;
 			proxy = new Proxy(obj, {
 				get(target, prop, receiver) {
-					if (isContextProp(prop)) {
-						return contextGetter(proxy, target, prop, observers, parent);
-					}
-					if (Reflect.has(target, prop)) {
-						if (detectingObservables) {
-							detectingObservables.push([proxy, prop]);
+					let result = contextGetter(proxy, target, prop, observers, parent);
+					if (undefined === result) {
+						if (Reflect.has(target, prop)) {
+							result = Reflect.get(target, prop, receiver);
+							if (isFunction(result)) {
+								result = result.bind(proxy);
+							} else if (detectingObservables) {
+								detectingObservables.push([proxy, prop]);
+							}
+						} else if (typeof prop !== 'symbol') {
+							if (parent) {
+	//							console.log(`Undefined property '${prop}' in current observeObject, lookup parent`, {target,parent});
+								result = parent[prop];
+							} else {
+								console.error(`Undefined property '${prop}' in current observeObject`, {target,parent});
+							}
 						}
-						let result = Reflect.get(target, prop, receiver);
-						if (isFunction(result)) {
-							result = result.bind(proxy);
-						}
-						return result;
 					}
-					if (typeof prop !== 'symbol') {
-						if (parent) {
-							return parent[prop];
-						}
-						console.error(`Undefined property '${prop}' in current scope`);
-					}
+					return result;
+				},
+				has(target, prop) {
+					return isContextProp(prop) || Reflect.has(target, prop);
+					// || (parent && prop in parent)
 				},
 				set(target, prop, value, receiver) {
 					let result = true;
@@ -194,6 +204,10 @@
 						}
 					}
 					return result;
+				},
+				deleteProperty(target, prop) {
+					Reflect.has(target, prop) && observers.delete(prop);
+					return Reflect.deleteProperty(target, prop);
 				}
 			});
 			observablesMap.set(obj, proxy);
@@ -247,19 +261,19 @@
 		static path(expr, context, writer) {
 			let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
 			if (match) {
-				if (!isObserved(context)) {
+				if (!isObservable(context)) {
 					throw new TalError(`context '${expr}' can't be observed`);
 				}
 				match = match[1].trim().split("/");
 				let i = 0, l = match.length - 1;
 				for (; i < l; ++i) {
 					if (!(match[i] in context)) {
-						console.error(`Path '${expr}' part '${match[i]}' not found`, context);
+						console.error(`Path '${expr}' part ${i} not found`, context);
 						return;
 					}
 					let newContext = context[match[i]];
-					if (!isObserved(newContext)) {
-						newContext = observeObject(newContext, context[match[i]]);
+					if (!isObservable(newContext)) {
+						newContext = observeObject(newContext, context);
 						try {
 							context[match[i]] = newContext;
 						} catch (e) {
@@ -309,10 +323,7 @@
 		}
 		let proxy = observablesMap.get(obj);
 		if (!proxy) {
-			if (!parent || !parent[IS_PROXY]) {
-				parent = null;
-			}
-			obj = observeObject(obj);
+			obj = observeObject(obj, parent);
 			proxy = new Proxy(obj, {
 				get(target, prop, receiver) {
 					switch (prop)
@@ -379,62 +390,6 @@
 		return proxy;
 	}
 
-	function observePrimitive(prim, parent/*, deep*/)
-	{
-		if (prim[IS_PROXY]) {
-			return prim;
-		}
-
-		if (!['string','number','boolean','bigint'].includes(typeof prim)
-	//	 	&& null !== prim
-	//	 	&& undefined !== prim
-	//	 	&& !(prim instanceof String)
-	//		&& !(prim instanceof Number)
-	//		&& !(prim instanceof Boolean)
-	//		&& !(prim instanceof BigInt)
-		) {
-			throw new TalError("Not a primitive");
-		}
-
-		if (!parent || !parent[IS_PROXY]) {
-			parent = null;
-		}
-
-		const obj = nullObject();
-		obj.value = prim;
-
-		const proxy = new Proxy(obj, {
-			get(target, prop) {
-				switch (prop)
-				{
-					case IS_PROXY: return 1;
-					/**
-					* TAL built-in Names
-					* https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
-					*/
-					case "root":
-						return parent ? parent[prop] : proxy;
-					case "context":
-						return proxy;
-				}
-				const prim = Reflect.get(target, 'value');
-				const value = prim[prop];
-				if (null != value) {
-					return isFunction(value) ? value.bind(prim) : value;
-				}
-				if (typeof prop !== 'symbol') {
-					if (parent) {
-						return parent[prop];
-					}
-					console.error(`Undefined property '${prop}' in current scope`);
-				}
-
-			}
-		});
-
-		return proxy;
-	}
-
 	function observeFunction(fn, parent)
 	{
 		if (!isFunction(fn)) {
@@ -442,8 +397,11 @@
 		}
 		let proxy = observablesMap.get(fn);
 		if (!proxy) {
-			if (!parent || !parent[IS_PROXY]) {
+			if (!parent) {
 				parent = null;
+			} else if (!parent[OBSERVABLE]) {
+				console.dir({parent});
+				throw new TalError('parent is not observable');
 			}
 			const observers = new Observers;
 			proxy = new Proxy(fn, {
@@ -474,43 +432,14 @@
 				},
 				apply(target, thisArg, argumentsList) {
 					return Reflect.apply(target, thisArg, argumentsList);
+				},
+				deleteProperty(target, prop) {
+					Reflect.has(target, prop) && observers.delete(prop);
 				}
 			});
 			observablesMap.set(fn, proxy);
 		}
 		return proxy;
-	/*
-				// A trap for the new operator.
-				construct() {
-				},
-				// A trap for Object.defineProperty.
-				defineProperty() {
-				},
-				// A trap for the delete operator.
-				deleteProperty() {
-				},
-				// A trap for Object.getOwnPropertyDescriptor.
-				getOwnPropertyDescriptor() {
-				},
-				// A trap for Object.getPrototypeOf.
-				getPrototypeOf() {
-				},
-				// A trap for the in operator.
-				has() {
-				},
-				// A trap for Object.isExtensible.
-				isExtensible() {
-				},
-				// A trap for Object.getOwnPropertyNames and Object.getOwnPropertySymbols.
-				ownKeys() {
-				},
-				// A trap for Object.preventExtensions.
-				preventExtensions() {
-				},
-				// A trap for Object.setPrototypeOf.
-				setPrototypeOf() {
-				},
-	*/
 	}
 
 	function observeType(item, parent/*, deep*/)
@@ -526,7 +455,8 @@
 		case "number":
 		case "string":
 		case "symbol":
-			return observePrimitive(item, parent/*, deep*/);
+			return item;
+	//		return observePrimitive(item, parent/*, deep*/);
 		}
 
 		let observable = observablesMap.get(item);
@@ -612,14 +542,11 @@
 		static content(el, value, context) {
 			let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
 				expression = match[2],
-				text, getter = resolveTales(expression, context),
+				getter = resolveTales(expression, context),
 				mode = "structure" === match[1] ? "innerHTML" : "textContent";
-			if (getter) {
-				detectObservables();
-				text = getterValue(getter);
-				processDetectedObservables(el, () => el[mode] = getterValue(getter));
-			}
-			el[mode] = text;
+			detectObservables();
+			el[mode] = getterValue(getter);
+			processDetectedObservables(el, () => el[mode] = getterValue(getter));
 		}
 
 		/**
@@ -652,10 +579,13 @@
 				detectObservables();
 				text = getterValue(getter);
 				processDetectedObservables(el, () => fn(getterValue(getter)));
-			} else if ("structure" === match[1]) {
-				fn = string => el.outerHTML = string;
 			} else {
-				fn = string => el.replaceWith(string);
+				text = getterValue(getter);
+				if ("structure" === match[1]) {
+					fn = string => el.outerHTML = string;
+				} else {
+					fn = string => el.replaceWith(string);
+				}
 			}
 			fn(text);
 		}
@@ -727,11 +657,11 @@
 				createItem = value => {
 					let node = el.cloneNode(true), subContext;
 					try {
-						value = observeType(value);
+						value = observeType(value, context);
 					} catch (e) {
 						console.error(e);
 					}
-					if ('context' == match[1] && isObserved(value)) {
+					if ('$data' == match[1] && isObservable(value)) {
 						subContext = value;
 					} else {
 						subContext = observeObject(nullObject(), context);
@@ -765,7 +695,7 @@
 			let getter = Tales.path(match[2], context);
 			let array = getter ? getterValue(getter) : null;
 			if (array) {
-				if (!isObserved(array)) {
+				if (!isObservable(array)) {
 					array = observeArray(array, context);
 					getter.context[getter.prop] = array;
 				}
@@ -907,7 +837,7 @@
 		if (!(template instanceof Element)) {
 			throw new TalError("template not an instance of Element");
 		}
-		if (!isObserved(context)) {
+		if (!isObservable(context)) {
 			throw new TalError("context is not observed");
 		}
 	//	context = observeObject(context);

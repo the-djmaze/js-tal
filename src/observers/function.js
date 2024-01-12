@@ -12,8 +12,11 @@ export function observeFunction(fn, parent)
 	}
 	let proxy = observablesMap.get(fn);
 	if (!proxy) {
-		if (!parent || !parent[OBSERVABLE]) {
+		if (!parent) {
 			parent = null;
+		} else if (!parent[OBSERVABLE]) {
+			console.dir({parent});
+			throw new TalError('parent is not observable');
 		}
 		const observers = new Observers;
 		proxy = new Proxy(fn, {
