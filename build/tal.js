@@ -216,12 +216,7 @@
 	}
 
 	/**
-	 * This can be very complex, like:
-	 * <div tal:repeat="item context/cart">
-	 *     <div tal:repeat="prop item/props">
-	 *         <input tal:attributes="name 'item[${item/id}][${prop/id}]'"/>
-	 *     </div>
-	 * </div>
+	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#tales-overview
 	 */
 	class Tales
 	{
@@ -232,21 +227,19 @@
 			}
 			return Tales.path(expr, context, writer) || Tales.string(expr);
 		}
-	/**
-		TALES:
-			'exists:'
-			'not:'
-			'nocall:'
-			'path:'
-			'string:'
-			'js:'
-	*/
+
+		/**
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#tales-string-expressions
+		 */
 		static string(expr) {
 			expr = expr.trim().match(/^(?:'([^']*)'|"([^"]*)"|string:(.*))$/) || [];
 			expr[0] = null;
 			return expr.find(str => null != str);
 		}
 
+		/**
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#tales-not-expressions
+		 */
 		static not(expr, context) {
 			let match = expr.trim().match(/^not:(.+)$/);
 			if (match) {
@@ -258,6 +251,31 @@
 			}
 		}
 
+		/**
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#tales-exists-expressions
+		 */
+		static exists(expr, context) {
+			let match = expr.trim().match(/^(?:exists:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
+			if (match) {
+				if (!isObservable(context)) {
+					throw new TalError(`context '${expr}' can't be observed`);
+				}
+				match = match[1].trim().split("/");
+				let i = 0, l = match.length;
+				for (; i < l; ++i) {
+					if (!(match[i] in context)) {
+						return false;
+					}
+					context = context[match[i]];
+				}
+				return !!context;
+			}
+			return false;
+		}
+
+		/**
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#tales-path-expressions
+		 */
 		static path(expr, context, writer) {
 			let match = expr.trim().match(/^(?:path:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
 			if (match) {
@@ -297,6 +315,16 @@
 				result.context = context;
 				result.prop = match[l];
 				return result;
+			}
+		}
+
+		/**
+		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#tales-nocall-expressions
+		 */
+		static nocall(expr) {
+			let match = expr.trim().match(/^(?:nocall:)?([a-zA-Z][a-zA-Z0-9_]*(?:\/[a-zA-Z0-9][a-zA-Z0-9_]*)*)$/);
+			if (match) {
+				throw new TalError(`Tales nocall: is not supported`);
 			}
 		}
 
