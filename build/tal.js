@@ -330,7 +330,7 @@
 
 		static js(expr, context) {
 			expr = expr.trim().match(/^js:(.*)$/);
-			if (expr) {
+			if (expr) try {
 				let fn = new Function("$context", `with($context){return ${expr[1]}}`);
 				return () => {
 					try {
@@ -339,6 +339,8 @@
 						console.error(e, {expr, context});
 					}
 				};
+			} catch (e) {
+				console.error(e, {expr, context});
 			}
 		}
 	}
@@ -524,7 +526,7 @@
 				node.remove();
 			}
 		},
-		resolveTales = (expression, context) => Tales.resolve(expression, context),
+		resolveTales = (expression, context, writer) => Tales.resolve(expression, context, writer),
 		getterValue = getter => isFunction(getter) ? getter() : getter,
 		processDetectedObservables = (el, fn) =>
 			getDetectedObservables().forEach(([obj, prop]) =>
@@ -720,7 +722,7 @@
 
 			el.replaceWith(target);
 
-			let getter = Tales.path(match[2], context);
+			let getter = resolveTales(match[2], context);
 			let array = getter ? getterValue(getter) : null;
 			if (array) {
 				if (!isObservable(array)) {
@@ -810,7 +812,7 @@
 	//			value.matchAll(/([^\s;]+)\s+([^;]+)/);
 				value.split(";").forEach(attr => {
 					if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
-						const setter = Tales.path(attr[2], context, true);
+						const setter = resolveTales(attr[2], context, true);
 						if (setter) {
 							if ("value" === attr[1] || "checked" === attr[1]) {
 								el.addEventListener("change", () => setter(el[attr[1]]));

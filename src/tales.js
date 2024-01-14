@@ -8,9 +8,9 @@ import { observeObject } from 'observers/object';
 export class Tales
 {
 	static resolve(expr, context, writer) {
-		let match = expr.trim().match(/^([a-z]+):/);
+		let match = expr.trim().match(/^([a-z]+):(.+)/);
 		if (match && Tales[match[1]]) {
-			return Tales[match[1]](expr, context, writer);
+			return Tales[match[1]](match[2], context, writer);
 		}
 		return Tales.path(expr, context, writer) || Tales.string(expr);
 	}
@@ -117,7 +117,7 @@ export class Tales
 
 	static js(expr, context) {
 		expr = expr.trim().match(/^js:(.*)$/);
-		if (expr) {
+		if (expr) try {
 			let fn = new Function("$context", `with($context){return ${expr[1]}}`)
 			return () => {
 				try {
@@ -126,6 +126,8 @@ export class Tales
 					console.error(e, {expr, context});
 				}
 			};
+		} catch (e) {
+			console.error(e, {expr, context});
 		}
 	}
 }

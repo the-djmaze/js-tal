@@ -1,8 +1,8 @@
 
 class ObservablesMap extends WeakMap {
-    get(obj) {
+	get(obj) {
 		return obj[OBSERVABLE] ? obj : super.get(obj);
-    }
+	}
 }
 
 export class Observers extends Map {

@@ -24,7 +24,7 @@ const
 			node.remove();
 		}
 	},
-	resolveTales = (expression, context) => Tales.resolve(expression, context),
+	resolveTales = (expression, context, writer) => Tales.resolve(expression, context, writer),
 	getterValue = getter => isFunction(getter) ? getter() : getter,
 	processDetectedObservables = (el, fn) =>
 		getDetectedObservables().forEach(([obj, prop]) =>
@@ -220,7 +220,7 @@ export class Statements
 
 		el.replaceWith(target);
 
-		let getter = Tales.path(match[2], context);
+		let getter = resolveTales(match[2], context);
 		let array = getter ? getterValue(getter) : null;
 		if (array) {
 			if (!isObservable(array)) {
@@ -310,7 +310,7 @@ export class Statements
 //			value.matchAll(/([^\s;]+)\s+([^;]+)/);
 			value.split(";").forEach(attr => {
 				if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
-					const setter = Tales.path(attr[2], context, true);
+					const setter = resolveTales(attr[2], context, true);
 					if (setter) {
 						if ("value" === attr[1] || "checked" === attr[1]) {
 							el.addEventListener("change", () => setter(el[attr[1]]));
