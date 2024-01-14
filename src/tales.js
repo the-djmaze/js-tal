@@ -10,7 +10,7 @@ export class Tales
 	static resolve(expr, context, writer) {
 		let match = expr.trim().match(/^([a-z]+):(.+)/);
 		if (match && Tales[match[1]]) {
-			return Tales[match[1]](match[2], context, writer);
+			return Tales[match[1]](expr, context, writer);
 		}
 		return Tales.path(expr, context, writer) || Tales.string(expr);
 	}
@@ -116,16 +116,18 @@ export class Tales
 	}
 
 	static js(expr, context) {
-		expr = expr.trim().match(/^js:(.*)$/);
-		if (expr) try {
-			let fn = new Function("$context", `with($context){return ${expr[1]}}`)
-			return () => {
-				try {
-					return fn(context);
-				} catch (e) {
-					console.error(e, {expr, context});
-				}
-			};
+		let match = expr.trim().match(/^js:(.+)$/);
+		if (match) try {
+			let fn = new Function("$context", `with($context){return ${match[1]}}`),
+				result = () => {
+					try {
+						return fn(context);
+					} catch (e) {
+						console.error(e, {expr, context});
+					}
+				};
+			result.context = context;
+			return result;
 		} catch (e) {
 			console.error(e, {expr, context});
 		}
