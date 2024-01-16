@@ -2,6 +2,8 @@
 	'use strict';
 
 	const
+		isArray = val => Array.isArray(val),
+		isDefined = val => undefined !== val,
 		isFunction = val => typeof val === "function",
 		isObject = val => typeof val === "object",
 		nullObject = () => Object.create(null),
@@ -10,6 +12,7 @@
 		{
 			const value = el.getAttribute(name);
 			el.removeAttribute(name);
+			value && ((el.TAL || (el.TAL = {})).name = value);
 			return value;
 		};
 
@@ -23,12 +26,20 @@
 
 	class Observers extends Map {
 
-		observe(property, callback) {
+		observe(property, callback, event) {
+			if ("beforeChange" === event) {
+				// To observe old value
+				property = property + ".beforeChange";
+			}
 			this.has(property) || this.set(property, new Set);
 			this.get(property).add(callback);
 		}
 
-		unobserve(property, callback) {
+		unobserve(property, callback, event) {
+			if ("beforeChange" === event) {
+				// To unobserve old value
+				property = property + ".beforeChange";
+			}
 			this.has(property) && this.get(property).delete(callback);
 		}
 
@@ -64,21 +75,34 @@
 
 		observablesMap = new ObservablesMap(),
 
-		contextGetter = (proxy, target, prop, observers, parent) => {
+		// Vue trigger
+		dispatch = (callbacks, prop, value) => {
+			callbacks && callbacks.forEach(cb => {
+				try {
+					cb(value, prop);
+				} catch (e) {
+					console.error(e, {
+						prop: prop,
+						value: value,
+						callback:cb
+					});
+				}
+			});
+			return true;
+		},
+
+		contextGetter = (observable, target, prop, observers, parent) => {
 			switch (prop)
 			{
 				case OBSERVABLE: return 1;
 				// Vue watch(), Knockout subscribe()
 				case "observe":
-	//				callback(obj[property], property);
-					// fallthrough
 				case "unobserve":
-	//				return (property, callback) => observers[prop](property, callback);
 					return observers[prop].bind(observers);
 				case "clearObservers":
 					return () => observers.clear();
-				case "getObservers":
-					return () => observers;
+				case "observers":
+					return observers;
 				case "refreshObservers":
 					return () => observers.dispatchAll(target);
 				// Vue computed(), Knockout computed()
@@ -94,12 +118,12 @@
 				 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#built-in-names
 				 */
 				case "context":
-					return proxy;
+					return observable;
 				case "parent":
 					return parent;
 				case "root":
-					return parent ? parent[prop] : proxy;
-	//				return (parent && parent[OBSERVABLE]) ? parent[prop] : proxy;
+					return parent ? parent[prop] : observable;
+	//				return (parent && parent[OBSERVABLE]) ? parent[prop] : observable;
 			}
 		};
 
@@ -108,29 +132,14 @@
 			"observe",
 			"unobserve",
 			"clearObservers",
-			"getObservers",
+			"observers",
 			"refreshObservers",
 			"defineComputed",
 			// TAL
 			"context",
 			"parent",
 			"root"
-		],
-		// Vue trigger
-		dispatch = (callbacks, prop, value) => {
-			try {
-				callbacks && callbacks.forEach(cb => cb(value, prop));
-				return true;
-			} catch (e) {
-				console.dir({
-					prop: prop,
-					value: value,
-					callbacks:callbacks
-				});
-				console.error(e);
-				return false;
-			}
-		};
+		];
 
 	function observeObject(obj, parent/*, deep*/)
 	{
@@ -138,14 +147,14 @@
 			return obj;
 		}
 
-		let proxy = observablesMap.get(obj);
-		if (!proxy) {
+		let observable = observablesMap.get(obj);
+		if (!observable) {
 	/*
 			// If deep doesn't evaluate to true, only a shallow proxy is created
 			if (deep) {
 				Object.entries(properties).forEach(([key,value]) => {
 					if (isObject(value)) {
-						if (Array.isArray(value)) {
+						if (isArray(value)) {
 							// Observe the array
 						} else {
 							// Observe the object
@@ -162,17 +171,17 @@
 				throw new TalError('parent is not observable');
 			}
 			const observers = new Observers;
-			proxy = new Proxy(obj, {
+			observable = new Proxy(obj, {
 				get(target, prop, receiver) {
-					let result = contextGetter(proxy, target, prop, observers, parent);
-					if (undefined === result) {
+					let result = contextGetter(observable, target, prop, observers, parent);
+					if (!isDefined(result)) {
 						if (Reflect.has(target, prop)) {
 							result = Reflect.get(target, prop, receiver);
-							if (isFunction(result)) {
-								result = result.bind(proxy);
-							} else if (detectingObservables) {
-								detectingObservables.push([proxy, prop]);
+							if (isFunction(result) && !result[OBSERVABLE]) {
+								return (...args) => result.apply(target, args);
+	//							return (...args) => result.apply(observable, args);
 							}
+							detectingObservables?.push([observable, prop]);
 						} else if (typeof prop !== 'symbol') {
 							if (parent) {
 	//							console.log(`Undefined property '${prop}' in current observeObject, lookup parent`, {target,parent});
@@ -196,6 +205,7 @@
 						}
 						let oldValue = Reflect.get(target, prop, receiver);
 						if (oldValue !== value) {
+							observers.dispatch(prop + ".beforeChange", oldValue);
 							result = Reflect.set(target, prop, value, receiver);
 							value = Reflect.get(target, prop, receiver);
 							if (result && oldValue !== value) {
@@ -210,9 +220,9 @@
 					return Reflect.deleteProperty(target, prop);
 				}
 			});
-			observablesMap.set(obj, proxy);
+			observablesMap.set(obj, observable);
 		}
-		return proxy;
+		return observable;
 	}
 
 	/**
@@ -244,10 +254,10 @@
 			let match = expr.trim().match(/^not:(.+)$/);
 			if (match) {
 				let fn = Tales.resolve(match[1], context);
-				let result = () => !fn();
-				result.context = fn.context;
-				result.prop = fn.prop;
-				return result;
+				let not = () => !fn();
+				not.talesContext = fn.talesContext;
+				not.talesProp = fn.talesProp;
+				return not;
 			}
 		}
 
@@ -304,17 +314,17 @@
 				if (!isFunction(fn)) {
 					fn = (writer ? value => context[match[l]] = value : () => context[match[l]]);
 				}
-				fn = fn.bind(context);
-				let result = value => {
+				let path = (...args) => {
 					try {
-						return fn(value);
+						return fn.apply(context, args);
 					} catch (e) {
 						console.error(e, {expr, context});
 					}
 				};
-				result.context = context;
-				result.prop = match[l];
-				return result;
+				path.talesContext = context;
+				path.talesProp = match[l];
+	//			path.fnBody = path.toString();
+				return path;
 			}
 		}
 
@@ -331,16 +341,16 @@
 		static js(expr, context) {
 			let match = expr.trim().match(/^js:(.+)$/);
 			if (match) try {
-				let fn = new Function("$context", `with($context){return ${match[1]}}`),
-					result = () => {
+				let fn = new Function(`with(this){return ${match[1]}}`),
+					js = () => {
 						try {
-							return fn(context);
+							return fn.apply(context);
 						} catch (e) {
 							console.error(e, {expr, context});
 						}
 					};
-				result.context = context;
-				return result;
+				js.talesContext = context;
+				return js;
 			} catch (e) {
 				console.error(e, {expr, context});
 			}
@@ -349,21 +359,22 @@
 
 	function observeArray(obj, parent/*, deep*/)
 	{
-	//	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
-		if (!Array.isArray(obj)) {
+	//	if (!isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
+		if (!isArray(obj)) {
 			throw new TalError("Not an Array");
 		}
-		let proxy = observablesMap.get(obj);
-		if (!proxy) {
+		let observable = observablesMap.get(obj);
+		if (!observable) {
 			obj = observeObject(obj, parent);
-			proxy = new Proxy(obj, {
+			const observers = obj.observers;
+			observable = new Proxy(obj, {
 				get(target, prop, receiver) {
 					switch (prop)
 					{
 					// Set
 					case "clear":
 						return () => {
-							target.getObservers().dispatch(prop);
+							observers.dispatch(prop);
 							return target.clear();
 						};
 					case "add":
@@ -376,19 +387,20 @@
 					case "sort":
 						throw new TalError("Array.prototype."+prop+"() not supported");
 					case "shift":
-	//					case "pop":
+					case "pop":
 						return () => {
+							observers.dispatch(prop+".beforeChange");
 							let value = target[prop]();
-							target.getObservers().dispatch(prop, value);
+							observers.dispatch(prop, value);
 							return value;
 						};
 					case "unshift":
 					case "splice":
 					case "push":
 						return (...args) => {
-							args = args.map(target => observeObject(target, proxy));
+							args = args.map(target => observeObject(target, observable));
 							let result = target[prop](...args);
-							target.getObservers().dispatch(prop, args);
+							observers.dispatch(prop, args);
 							return result;
 						};
 					}
@@ -398,28 +410,28 @@
 					let result = true;
 					if (!detectingObservables) {
 						if (isFinite(prop)) {
-							value = observeObject(value, proxy);
+							value = observeObject(value, observable);
 							let oldValue = Reflect.get(target, prop, receiver);
 							if (oldValue !== value) {
 								result = Reflect.set(target, prop, value, receiver);
 								value = Reflect.get(target, prop, receiver);
 								if (result && oldValue !== value) {
-									target.getObservers().dispatch("set", {index:prop, value});
+									observers.dispatch("set", {index:prop, value});
 								}
 							}
 						} else {
-							target.getObservers().dispatch(prop, value);
+							observers.dispatch(prop, value);
 						}
 					}
 					return result;
 				}
 			});
 
-			obj.forEach((item, index) => obj[index] = observeObject(item, proxy));
+			obj.forEach((item, index) => obj[index] = observeObject(item, observable));
 
-			observablesMap.set(obj, proxy);
+			observablesMap.set(obj, observable);
 		}
-		return proxy;
+		return observable;
 	}
 
 	function observeFunction(fn, parent)
@@ -427,8 +439,8 @@
 		if (!isFunction(fn)) {
 			throw new TalError("Not a Function");
 		}
-		let proxy = observablesMap.get(fn);
-		if (!proxy) {
+		let observable = observablesMap.get(fn);
+		if (!observable) {
 			if (!parent) {
 				parent = null;
 			} else if (!parent[OBSERVABLE]) {
@@ -436,10 +448,10 @@
 				throw new TalError('parent is not observable');
 			}
 			const observers = new Observers;
-			proxy = new Proxy(fn, {
+			observable = new Proxy(fn, {
 				get(target, prop, receiver) {
 					if (isContextProp(prop)) {
-						return contextGetter(proxy, target, prop, observers, parent);
+						return contextGetter(observable, target, prop, observers, parent);
 					}
 					return Reflect.get(target, prop, receiver);
 				},
@@ -469,9 +481,9 @@
 					Reflect.has(target, prop) && observers.delete(prop);
 				}
 			});
-			observablesMap.set(fn, proxy);
+			observablesMap.set(fn, observable);
 		}
-		return proxy;
+		return observable;
 	}
 
 	function observeType(item, parent/*, deep*/)
@@ -498,7 +510,7 @@
 
 		if ("function" === type) {
 			observable = observeFunction(item, parent/*, deep*/);
-		} else if (Array.isArray(item)) {
+		} else if (isArray(item)) {
 			observable = observeArray(item, parent/*, deep*/);
 		} else if ("object" === type) {
 			observable = observeObject(item, parent/*, deep*/);
@@ -520,6 +532,9 @@
 			el[observables] || (el[observables] = new Set);
 			el[observables].add(()=>obj.unobserve(prop, cb));
 		},
+		regexKeyExpression = /^([^\s]+)\s+(.+)$/,
+		regexTextStructure = /^(?:(text|structure)\s+)?(.*)$/,
+		regexLocalGlobal   = /^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/,
 		removeNode = node => {
 			if (node) {
 				node[observables]?.forEach?.(cb => cb());
@@ -544,9 +559,9 @@
 		static attributes(el, value, context) {
 	//		value.matchAll(/([^\s;]+)\s+([^;]+)/);
 			value.split(";").forEach(attr => {
-				attr = attr.trim().match(/^([^\s]+)\s+(.+)$/);
+				attr = attr.trim().match(regexKeyExpression);
 				let text, getter = resolveTales(attr[2], context);
-				if (getter) {
+				if (isDefined(getter)) {
 					detectObservables();
 					text = getterValue(getter);
 					processDetectedObservables(el, value => {
@@ -572,13 +587,15 @@
 		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#content-replace-the-content-of-an-element
 		 */
 		static content(el, value, context) {
-			let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
+			let match = value.trim().match(regexTextStructure),
 				expression = match[2],
 				getter = resolveTales(expression, context),
 				mode = "structure" === match[1] ? "innerHTML" : "textContent";
-			detectObservables();
-			el[mode] = getterValue(getter);
-			processDetectedObservables(el, () => el[mode] = getterValue(getter));
+			if (isDefined(getter)) {
+				detectObservables();
+				el[mode] = getterValue(getter);
+				processDetectedObservables(el, () => el[mode] = getterValue(getter));
+			}
 		}
 
 		/**
@@ -586,7 +603,7 @@
 		 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#replace-replace-an-element
 		 */
 		static replace(el, value, context) {
-			let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
+			let match = value.trim().match(regexTextStructure),
 				expression = match[2],
 				text, getter = resolveTales(expression, context),
 				fn;
@@ -628,14 +645,18 @@
 		 */
 		static define(el, expression, context) {
 			expression.split(";").forEach(def => {
-				def = def.trim().match(/^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/);
-				let getter = resolveTales(def[3], context),
-					text = getter ? getterValue(getter) : "",
-					prop = getter.prop || def[2];
-				context = getter.context || context;
+				def = def.trim().match(regexLocalGlobal);
+				let prop = def[2],
+					expression = def[3],
+					getter = resolveTales(expression, context),
+					text = getterValue(getter);
 				if ("global" === def[1]) {
-					// TODO: get root context
-					context[prop] = text;
+					let root = context.root;
+					if (prop in root && isFunction(root[prop])) {
+						root[prop](text, el);
+					} else {
+						root[prop] = text;
+					}
 				} else if (prop in context && isFunction(context[prop])) {
 					context[prop](text, el);
 				} else {
@@ -660,7 +681,7 @@
 					}
 				};
 			el.replaceWith(target);
-			if (getter) {
+			if (isDefined(getter)) {
 				detectObservables();
 				text = getterValue(getter);
 				processDetectedObservables(el, () => fn(getterValue(getter)));
@@ -683,7 +704,7 @@
 		 * </div>
 		 */
 		static repeat(el, expression, context, parser) {
-			const match = expression.trim().match(/^([^\s]+)\s+(.+)$/),
+			const match = expression.trim().match(regexKeyExpression),
 				items = [],
 				target = el.ownerDocument.createTextNode(""),
 				createItem = value => {
@@ -725,35 +746,35 @@
 			el.replaceWith(target);
 
 			let getter = resolveTales(match[2], context);
-			let array = getter ? getterValue(getter) : null;
+			let array = getterValue(getter);
 			if (array) {
-				if (!isObservable(array)) {
+				if (!isObservable(array) && getter.talesProp) {
+	//				if (!isArray(array)) {
 					array = observeArray(array, context);
-					getter.context[getter.prop] = array;
+					getter.talesContext[getter.talesProp] = array;
 				}
 				observe(el, array, "clear", () => {
 					items.forEach(removeNode);
 					items.length = 0;
 				});
-				observe(el, array, "shift", () => removeNode(items.shift()));
+				observe(el, array, "pop.beforeChange", () => removeNode(items.pop()));
+				observe(el, array, "shift.beforeChange", () => removeNode(items.shift()));
 				observe(el, array, "unshift", (args) => {
 					let i = args.length;
 					while (i--) items.add(args[i], 0);
-		//			args.forEach((item, i) => items.add(item, i));
 				});
 				observe(el, array, "splice", (args) => {
+					let i;
 					if (0 < args[1]) {
-						let i = Math.min(items.length, args[0] + args[1]);
+						i = Math.min(items.length, args[0] + args[1]);
 						while (args[0] < i--) removeNode(items[i]);
 						items.splice(args[0], args[1]);
 					}
-					for (let i = 2; i < args.length; ++i) {
+					for (i = 2; i < args.length; ++i) {
 						items.add(args[i], args[0]);
 					}
 				});
-				observe(el, array, "push", (args) => {
-					args.forEach(item => items.add(item));
-				});
+				observe(el, array, "push", (args) => args.forEach(item => items.add(item)));
 				observe(el, array, "length", length => {
 					while (items.length > length) removeNode(items.pop());
 				});
@@ -765,6 +786,10 @@
 					} else {
 						items.add(item.value, item.index);
 					}
+				});
+				observe(el, observable, "value", array => {
+					while (items.length > 0) removeNode(items.pop());
+					array.forEach((value, pos) => items.add(value, pos));
 				});
 
 				// Fill the list with current repeat values
@@ -783,7 +808,7 @@
 		static ["omit-tag"](el, expression, context) {
 			if (expression) {
 				let getter = resolveTales(expression, context);
-				if (getter) {
+				if (isDefined(getter)) {
 	//				detectObservables();
 					expression = getterValue(getter);
 	//				processDetectedObservables(el, () => fn(getterValue(getter)));
@@ -813,7 +838,7 @@
 			if (el.addEventListener) {
 	//			value.matchAll(/([^\s;]+)\s+([^;]+)/);
 				value.split(";").forEach(attr => {
-					if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
+					if (attr = attr.trim().match(regexKeyExpression)) {
 						const setter = resolveTales(attr[2], context, true);
 						if (setter) {
 							if ("value" === attr[1] || "checked" === attr[1]) {
@@ -922,29 +947,26 @@
 	*/
 
 			value = popAttribute(el, "tal:content");
-			let skip = false;
 			if (null != value) {
 				Statements.content(el, value, context);
 			} else if (null != (value = popAttribute(el, "tal:replace"))) {
 				Statements.replace(el, value, context);
-				skip = true;
+				return;
 			}
 
-			if (!skip) {
-				value = popAttribute(el, "tal:attributes");
-				if (null != value) {
-					Statements.attributes(el, value, context);
-				}
+			value = popAttribute(el, "tal:attributes");
+			if (null != value) {
+				Statements.attributes(el, value, context);
+			}
 
-				if (el.hasAttribute("tal:omit-tag")) {
-					Statements["omit-tag"](el, popAttribute(el, "tal:omit-tag"), context);
-				}
+			if (el.hasAttribute("tal:omit-tag")) {
+				Statements["omit-tag"](el, popAttribute(el, "tal:omit-tag"), context);
+			}
 
-				// Our two-way bindings
-				value = popAttribute(el, "tal:listen");
-				if (null != value) {
-					Statements.listen(el, value, context);
-				}
+			// Our two-way bindings
+			value = popAttribute(el, "tal:listen");
+			if (null != value) {
+				Statements.listen(el, value, context);
 			}
 
 	/*
@@ -964,6 +986,74 @@
 		// Convert KnockoutJS data-bind
 	// 	koConvertBindings
 	];
+
+	function observePrimitive(prim, parent/*, deep*/)
+	{
+		if (null != prim && prim[OBSERVABLE]) {
+			return prim;
+		}
+
+		if (!["string","number","boolean","bigint"].includes(typeof prim)
+		 	&& null !== prim
+	//	 	&& isDefined(prim)
+	//	 	&& !(prim instanceof String)
+	//		&& !(prim instanceof Number)
+	//		&& !(prim instanceof Boolean)
+	//		&& !(prim instanceof BigInt)
+		) {
+			throw new TalError("Not a primitive");
+		}
+
+		if (!parent) {
+			parent = null;
+		} else if (!parent[OBSERVABLE]) {
+			console.dir({parent});
+			throw new TalError("parent is not observable");
+		}
+
+		let value = prim;
+		const observers = new Observers;
+		const primitive = () => {};
+		const observable = new Proxy(primitive, {
+			get(target, prop, receiver) {
+				let primitiveGet = contextGetter(observable, target, prop, observers, parent);
+				if (!isDefined(primitiveGet)) {
+					primitiveGet = Reflect.has(target, prop) ? Reflect.get(target, prop, receiver) : value?.[prop];
+					if (isFunction(primitiveGet) && !primitiveGet[OBSERVABLE]) {
+						return (...args) => primitiveGet.apply(target, args);
+					}
+				}
+				return primitiveGet;
+			},
+			has(target, prop) {
+				return isContextProp(prop) || Reflect.has(target, prop) || Reflect.has(value, prop);
+				// || (parent && prop in parent)
+			},
+			set(target, prop, value, receiver) {
+				if (isContextProp(prop)) {
+					throw new TalError(`${prop} can't be initialized, it is internal`);
+				}
+				return Reflect.set(target, prop, value, receiver);
+			},
+			apply(target, thisArg, args) {
+				if (args.length) {
+					if (!detectingObservables && value != args[0]) {
+						observers.dispatch("value.beforeChange", value);
+						value = args[0];
+						observers.dispatch("value", value);
+					}
+					return observable;
+				}
+				detectingObservables?.push([observable, "value"]);
+				return value;
+			},
+			deleteProperty(target, prop) {
+				Reflect.has(target, prop) && observers.delete(prop);
+			}
+		});
+
+		return observable;
+	}
 
 	/*
 	 * When one of the properties inside the getter function is changed
@@ -1015,10 +1105,13 @@
 		observe: observeType,
 		observeObject,
 		observeArray,
-	//	observePrimitive,
+		observeFunction,
+		observePrimitive,
 	//	observeProperty,
 		TalError,
-		TALES: Tales
+		TALES: Tales,
+		detectObservables,
+		getDetectedObservables
 	};
 
 })();

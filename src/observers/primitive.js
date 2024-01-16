@@ -1,15 +1,16 @@
-import { isFunction, nullObject, TalError } from 'common';
-import { OBSERVABLE } from 'observers';
+import { isDefined, isFunction, TalError } from "common";
+import { isContextProp, contextGetter,
+	detectingObservables, OBSERVABLE, Observers } from "observers";
 
 export function observePrimitive(prim, parent/*, deep*/)
 {
-	if (prim[OBSERVABLE]) {
+	if (null != prim && prim[OBSERVABLE]) {
 		return prim;
 	}
 
-	if (!['string','number','boolean','bigint'].includes(typeof prim)
-//	 	&& null !== prim
-//	 	&& undefined !== prim
+	if (!["string","number","boolean","bigint"].includes(typeof prim)
+	 	&& null !== prim
+//	 	&& isDefined(prim)
 //	 	&& !(prim instanceof String)
 //		&& !(prim instanceof Number)
 //		&& !(prim instanceof Boolean)
@@ -22,38 +23,49 @@ export function observePrimitive(prim, parent/*, deep*/)
 		parent = null;
 	} else if (!parent[OBSERVABLE]) {
 		console.dir({parent});
-		throw new TalError('parent is not observable');
+		throw new TalError("parent is not observable");
 	}
 
-	const obj = nullObject();
-	obj.value = prim;
-
-	const proxy = new Proxy(obj, {
-		get(target, prop) {
-			switch (prop)
-			{
-				case OBSERVABLE: return 1;
-				case "context":
-					return context;
-				case "parent":
-					return parent;
-				case "root":
-					return parent ? parent[prop] : context;
-			}
-			const prim = Reflect.get(target, 'value');
-			const value = prim[prop];
-			if (null != value) {
-				return isFunction(value) ? value.bind(prim) : value;
-			}
-			if (typeof prop !== 'symbol') {
-				if (parent) {
-					return parent[prop];
+	let value = prim;
+	const observers = new Observers;
+	const primitive = () => {};
+	const observable = new Proxy(primitive, {
+		get(target, prop, receiver) {
+			let primitiveGet = contextGetter(observable, target, prop, observers, parent);
+			if (!isDefined(primitiveGet)) {
+				primitiveGet = Reflect.has(target, prop) ? Reflect.get(target, prop, receiver) : value?.[prop];
+				if (isFunction(primitiveGet) && !primitiveGet[OBSERVABLE]) {
+					return (...args) => primitiveGet.apply(target, args);
 				}
-				console.error(`Undefined property '${prop}' in current observePrimitive`, {target, parent});
 			}
-
+			return primitiveGet;
+		},
+		has(target, prop) {
+			return isContextProp(prop) || Reflect.has(target, prop) || Reflect.has(value, prop);
+			// || (parent && prop in parent)
+		},
+		set(target, prop, value, receiver) {
+			if (isContextProp(prop)) {
+				throw new TalError(`${prop} can't be initialized, it is internal`);
+			}
+			return Reflect.set(target, prop, value, receiver);
+		},
+		apply(target, thisArg, args) {
+			if (args.length) {
+				if (!detectingObservables && value != args[0]) {
+					observers.dispatch("value.beforeChange", value);
+					value = args[0];
+					observers.dispatch("value", value);
+				}
+				return observable;
+			}
+			detectingObservables?.push([observable, "value"]);
+			return value;
+		},
+		deleteProperty(target, prop) {
+			Reflect.has(target, prop) && observers.delete(prop);
 		}
 	});
 
-	return proxy;
+	return observable;
 }

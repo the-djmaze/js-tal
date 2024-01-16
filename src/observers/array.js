@@ -1,24 +1,25 @@
-import { TalError } from 'common';
+import { isArray, TalError } from 'common';
 import { observablesMap, detectingObservables } from 'observers';
 import { observeObject } from 'observers/object';
 
 export function observeArray(obj, parent/*, deep*/)
 {
-//	if (!Array.isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
-	if (!Array.isArray(obj)) {
+//	if (!isArray(obj) && !(obj instanceof Set) && !(obj instanceof Map)) {
+	if (!isArray(obj)) {
 		throw new TalError("Not an Array");
 	}
-	let proxy = observablesMap.get(obj);
-	if (!proxy) {
+	let observable = observablesMap.get(obj);
+	if (!observable) {
 		obj = observeObject(obj, parent);
-		proxy = new Proxy(obj, {
+		const observers = obj.observers;
+		observable = new Proxy(obj, {
 			get(target, prop, receiver) {
 				switch (prop)
 				{
 				// Set
 				case "clear":
 					return () => {
-						target.getObservers().dispatch(prop);
+						observers.dispatch(prop);
 						return target.clear();
 					};
 				case "add":
@@ -31,19 +32,20 @@ export function observeArray(obj, parent/*, deep*/)
 				case "sort":
 					throw new TalError("Array.prototype."+prop+"() not supported");
 				case "shift":
-//					case "pop":
+				case "pop":
 					return () => {
+						observers.dispatch(prop+".beforeChange");
 						let value = target[prop]();
-						target.getObservers().dispatch(prop, value);
+						observers.dispatch(prop, value);
 						return value;
 					};
 				case "unshift":
 				case "splice":
 				case "push":
 					return (...args) => {
-						args = args.map(target => observeObject(target, proxy));
+						args = args.map(target => observeObject(target, observable));
 						let result = target[prop](...args);
-						target.getObservers().dispatch(prop, args);
+						observers.dispatch(prop, args);
 						return result;
 					};
 				}
@@ -53,26 +55,26 @@ export function observeArray(obj, parent/*, deep*/)
 				let result = true;
 				if (!detectingObservables) {
 					if (isFinite(prop)) {
-						value = observeObject(value, proxy);
+						value = observeObject(value, observable);
 						let oldValue = Reflect.get(target, prop, receiver);
 						if (oldValue !== value) {
 							result = Reflect.set(target, prop, value, receiver);
 							value = Reflect.get(target, prop, receiver);
 							if (result && oldValue !== value) {
-								target.getObservers().dispatch("set", {index:prop, value});
+								observers.dispatch("set", {index:prop, value});
 							}
 						}
 					} else {
-						target.getObservers().dispatch(prop, value);
+						observers.dispatch(prop, value);
 					}
 				}
 				return result;
 			}
 		});
 
-		obj.forEach((item, index) => obj[index] = observeObject(item, proxy));
+		obj.forEach((item, index) => obj[index] = observeObject(item, observable));
 
-		observablesMap.set(obj, proxy);
+		observablesMap.set(obj, observable);
 	}
-	return proxy;
+	return observable;
 }

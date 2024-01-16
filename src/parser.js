@@ -65,29 +65,26 @@ export function parse(template, context)
 */
 
 		value = popAttribute(el, "tal:content");
-		let skip = false;
 		if (null != value) {
 			Statements.content(el, value, context);
 		} else if (null != (value = popAttribute(el, "tal:replace"))) {
 			Statements.replace(el, value, context);
-			skip = true;
+			return;
 		}
 
-		if (!skip) {
-			value = popAttribute(el, "tal:attributes");
-			if (null != value) {
-				Statements.attributes(el, value, context);
-			}
+		value = popAttribute(el, "tal:attributes");
+		if (null != value) {
+			Statements.attributes(el, value, context);
+		}
 
-			if (el.hasAttribute("tal:omit-tag")) {
-				Statements["omit-tag"](el, popAttribute(el, "tal:omit-tag"), context);
-			}
+		if (el.hasAttribute("tal:omit-tag")) {
+			Statements["omit-tag"](el, popAttribute(el, "tal:omit-tag"), context);
+		}
 
-			// Our two-way bindings
-			value = popAttribute(el, "tal:listen");
-			if (null != value) {
-				Statements.listen(el, value, context);
-			}
+		// Our two-way bindings
+		value = popAttribute(el, "tal:listen");
+		if (null != value) {
+			Statements.listen(el, value, context);
 		}
 
 /*

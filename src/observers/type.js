@@ -1,3 +1,4 @@
+import { isArray } from 'common';
 import { observablesMap } from 'observers';
 import { observeObject } from 'observers/object';
 import { observeArray } from 'observers/array';
@@ -28,7 +29,7 @@ export function observeType(item, parent/*, deep*/)
 
 	if ("function" === type) {
 		observable = observeFunction(item, parent/*, deep*/);
-	} else if (Array.isArray(item)) {
+	} else if (isArray(item)) {
 		observable = observeArray(item, parent/*, deep*/);
 	} else if ("object" === type) {
 		observable = observeObject(item, parent/*, deep*/);

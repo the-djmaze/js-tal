@@ -10,8 +10,8 @@ export function observeFunction(fn, parent)
 	if (!isFunction(fn)) {
 		throw new TalError("Not a Function");
 	}
-	let proxy = observablesMap.get(fn);
-	if (!proxy) {
+	let observable = observablesMap.get(fn);
+	if (!observable) {
 		if (!parent) {
 			parent = null;
 		} else if (!parent[OBSERVABLE]) {
@@ -19,10 +19,10 @@ export function observeFunction(fn, parent)
 			throw new TalError('parent is not observable');
 		}
 		const observers = new Observers;
-		proxy = new Proxy(fn, {
+		observable = new Proxy(fn, {
 			get(target, prop, receiver) {
 				if (isContextProp(prop)) {
-					return contextGetter(proxy, target, prop, observers, parent);
+					return contextGetter(observable, target, prop, observers, parent);
 				}
 				return Reflect.get(target, prop, receiver);
 			},
@@ -52,7 +52,7 @@ export function observeFunction(fn, parent)
 				Reflect.has(target, prop) && observers.delete(prop);
 			}
 		});
-		observablesMap.set(fn, proxy);
+		observablesMap.set(fn, observable);
 	}
-	return proxy;
+	return observable;
 }

@@ -1,4 +1,4 @@
-import { isFunction, nullObject } from 'common';
+import { isDefined, isFunction, nullObject } from 'common';
 import { Tales } from 'tales';
 import { isObservable, detectObservables, getDetectedObservables } from 'observers';
 import { observeObject } from 'observers/object';
@@ -16,6 +16,9 @@ const
 		el[observables] || (el[observables] = new Set);
 		el[observables].add(()=>obj.unobserve(prop, cb));
 	},
+	regexKeyExpression = /^([^\s]+)\s+(.+)$/,
+	regexTextStructure = /^(?:(text|structure)\s+)?(.*)$/,
+	regexLocalGlobal   = /^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/,
 	removeNode = node => {
 		if (node) {
 			node[observables]?.forEach?.(cb => cb());
@@ -40,9 +43,9 @@ export class Statements
 	static attributes(el, value, context) {
 //		value.matchAll(/([^\s;]+)\s+([^;]+)/);
 		value.split(";").forEach(attr => {
-			attr = attr.trim().match(/^([^\s]+)\s+(.+)$/);
+			attr = attr.trim().match(regexKeyExpression);
 			let text, getter = resolveTales(attr[2], context);
-			if (getter) {
+			if (isDefined(getter)) {
 				detectObservables();
 				text = getterValue(getter);
 				processDetectedObservables(el, value => {
@@ -68,13 +71,15 @@ export class Statements
 	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#content-replace-the-content-of-an-element
 	 */
 	static content(el, value, context) {
-		let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
+		let match = value.trim().match(regexTextStructure),
 			expression = match[2],
 			getter = resolveTales(expression, context),
 			mode = "structure" === match[1] ? "innerHTML" : "textContent";
-		detectObservables();
-		el[mode] = getterValue(getter);
-		processDetectedObservables(el, () => el[mode] = getterValue(getter));
+		if (isDefined(getter)) {
+			detectObservables();
+			el[mode] = getterValue(getter);
+			processDetectedObservables(el, () => el[mode] = getterValue(getter));
+		}
 	}
 
 	/**
@@ -82,7 +87,7 @@ export class Statements
 	 * https://zope.readthedocs.io/en/latest/zopebook/AppendixC.html#replace-replace-an-element
 	 */
 	static replace(el, value, context) {
-		let match = value.trim().match(/^(?:(text|structure)\s+)?(.+)$/),
+		let match = value.trim().match(regexTextStructure),
 			expression = match[2],
 			text, getter = resolveTales(expression, context),
 			fn;
@@ -124,14 +129,18 @@ export class Statements
 	 */
 	static define(el, expression, context) {
 		expression.split(";").forEach(def => {
-			def = def.trim().match(/^(?:(local|global)\s+)?([^\s]+)\s+(.+)$/);
-			let getter = resolveTales(def[3], context),
-				text = getter ? getterValue(getter) : "",
-				prop = getter.prop || def[2];
-			context = getter.context || context;
+			def = def.trim().match(regexLocalGlobal);
+			let prop = def[2],
+				expression = def[3],
+				getter = resolveTales(expression, context),
+				text = getterValue(getter);
 			if ("global" === def[1]) {
-				// TODO: get root context
-				context[prop] = text;
+				let root = context.root;
+				if (prop in root && isFunction(root[prop])) {
+					root[prop](text, el);
+				} else {
+					root[prop] = text;
+				}
 			} else if (prop in context && isFunction(context[prop])) {
 				context[prop](text, el);
 			} else {
@@ -156,7 +165,7 @@ export class Statements
 				}
 			};
 		el.replaceWith(target);
-		if (getter) {
+		if (isDefined(getter)) {
 			detectObservables();
 			text = getterValue(getter);
 			processDetectedObservables(el, () => fn(getterValue(getter)));
@@ -179,7 +188,7 @@ export class Statements
 	 * </div>
 	 */
 	static repeat(el, expression, context, parser) {
-		const match = expression.trim().match(/^([^\s]+)\s+(.+)$/),
+		const match = expression.trim().match(regexKeyExpression),
 			items = [],
 			target = el.ownerDocument.createTextNode(""),
 			createItem = value => {
@@ -221,35 +230,35 @@ export class Statements
 		el.replaceWith(target);
 
 		let getter = resolveTales(match[2], context);
-		let array = getter ? getterValue(getter) : null;
+		let array = getterValue(getter);
 		if (array) {
-			if (!isObservable(array)) {
+			if (!isObservable(array) && getter.talesProp) {
+//				if (!isArray(array)) {
 				array = observeArray(array, context);
-				getter.context[getter.prop] = array;
+				getter.talesContext[getter.talesProp] = array;
 			}
 			observe(el, array, "clear", () => {
 				items.forEach(removeNode);
 				items.length = 0;
 			});
-			observe(el, array, "shift", () => removeNode(items.shift()));
+			observe(el, array, "pop.beforeChange", () => removeNode(items.pop()));
+			observe(el, array, "shift.beforeChange", () => removeNode(items.shift()));
 			observe(el, array, "unshift", (args) => {
 				let i = args.length;
 				while (i--) items.add(args[i], 0);
-	//			args.forEach((item, i) => items.add(item, i));
 			});
 			observe(el, array, "splice", (args) => {
+				let i;
 				if (0 < args[1]) {
-					let i = Math.min(items.length, args[0] + args[1]);
+					i = Math.min(items.length, args[0] + args[1]);
 					while (args[0] < i--) removeNode(items[i]);
 					items.splice(args[0], args[1]);
 				}
-				for (let i = 2; i < args.length; ++i) {
+				for (i = 2; i < args.length; ++i) {
 					items.add(args[i], args[0]);
 				}
 			});
-			observe(el, array, "push", (args) => {
-				args.forEach(item => items.add(item));
-			});
+			observe(el, array, "push", (args) => args.forEach(item => items.add(item)));
 			observe(el, array, "length", length => {
 				while (items.length > length) removeNode(items.pop());
 			});
@@ -261,6 +270,10 @@ export class Statements
 				} else {
 					items.add(item.value, item.index);
 				}
+			});
+			observe(el, observable, "value", array => {
+				while (items.length > 0) removeNode(items.pop());
+				array.forEach((value, pos) => items.add(value, pos));
 			});
 
 			// Fill the list with current repeat values
@@ -279,7 +292,7 @@ export class Statements
 	static ["omit-tag"](el, expression, context) {
 		if (expression) {
 			let getter = resolveTales(expression, context);
-			if (getter) {
+			if (isDefined(getter)) {
 //				detectObservables();
 				expression = getterValue(getter);
 //				processDetectedObservables(el, () => fn(getterValue(getter)));
@@ -309,7 +322,7 @@ export class Statements
 		if (el.addEventListener) {
 //			value.matchAll(/([^\s;]+)\s+([^;]+)/);
 			value.split(";").forEach(attr => {
-				if (attr = attr.trim().match(/^([^\s]+)\s+(.+)$/)) {
+				if (attr = attr.trim().match(regexKeyExpression)) {
 					const setter = resolveTales(attr[2], context, true);
 					if (setter) {
 						if ("value" === attr[1] || "checked" === attr[1]) {

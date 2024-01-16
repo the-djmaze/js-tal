@@ -31,10 +31,10 @@ export class Tales
 		let match = expr.trim().match(/^not:(.+)$/);
 		if (match) {
 			let fn = Tales.resolve(match[1], context);
-			let result = () => !fn();
-			result.context = fn.context;
-			result.prop = fn.prop;
-			return result;
+			let not = () => !fn();
+			not.talesContext = fn.talesContext;
+			not.talesProp = fn.talesProp;
+			return not;
 		}
 	}
 
@@ -91,17 +91,17 @@ export class Tales
 			if (!isFunction(fn)) {
 				fn = (writer ? value => context[match[l]] = value : () => context[match[l]]);
 			}
-			fn = fn.bind(context);
-			let result = value => {
+			let path = (...args) => {
 				try {
-					return fn(value);
+					return fn.apply(context, args);
 				} catch (e) {
 					console.error(e, {expr, context});
 				}
 			}
-			result.context = context;
-			result.prop = match[l];
-			return result;
+			path.talesContext = context;
+			path.talesProp = match[l];
+//			path.fnBody = path.toString();
+			return path;
 		}
 	}
 
@@ -118,16 +118,16 @@ export class Tales
 	static js(expr, context) {
 		let match = expr.trim().match(/^js:(.+)$/);
 		if (match) try {
-			let fn = new Function("$context", `with($context){return ${match[1]}}`),
-				result = () => {
+			let fn = new Function(`with(this){return ${match[1]}}`),
+				js = () => {
 					try {
-						return fn(context);
+						return fn.apply(context);
 					} catch (e) {
 						console.error(e, {expr, context});
 					}
 				};
-			result.context = context;
-			return result;
+			js.talesContext = context;
+			return js;
 		} catch (e) {
 			console.error(e, {expr, context});
 		}

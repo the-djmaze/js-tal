@@ -1,8 +1,10 @@
 import { parse } from 'parser';
+import { detectObservables, getDetectedObservables } from 'observers';
 import { observeType } from 'observers/type';
 import { observeObject } from 'observers/object';
 import { observeArray } from 'observers/array';
-//import { observePrimitive } from 'observers/primitive';
+import { observeFunction } from 'observers/function';
+import { observePrimitive } from 'observers/primitive';
 //import { observeProperty } from 'observers/property';
 import { TalError } from 'common';
 import { Tales } from 'tales';
@@ -57,8 +59,11 @@ window.TAL = {
 	observe: observeType,
 	observeObject,
 	observeArray,
-//	observePrimitive,
+	observeFunction,
+	observePrimitive,
 //	observeProperty,
 	TalError,
-	TALES: Tales
+	TALES: Tales,
+	detectObservables,
+	getDetectedObservables
 };

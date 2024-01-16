@@ -1,4 +1,4 @@
-import { isObject, isFunction, TalError } from 'common';
+import { isDefined, isFunction, isObject, TalError } from 'common';
 import {
 	observablesMap, detectingObservables,
 	OBSERVABLE, Observers, isContextProp, contextGetter
@@ -10,14 +10,14 @@ export function observeObject(obj, parent/*, deep*/)
 		return obj;
 	}
 
-	let proxy = observablesMap.get(obj);
-	if (!proxy) {
+	let observable = observablesMap.get(obj);
+	if (!observable) {
 /*
 		// If deep doesn't evaluate to true, only a shallow proxy is created
 		if (deep) {
 			Object.entries(properties).forEach(([key,value]) => {
 				if (isObject(value)) {
-					if (Array.isArray(value)) {
+					if (isArray(value)) {
 						// Observe the array
 					} else {
 						// Observe the object
@@ -34,17 +34,17 @@ export function observeObject(obj, parent/*, deep*/)
 			throw new TalError('parent is not observable');
 		}
 		const observers = new Observers;
-		proxy = new Proxy(obj, {
+		observable = new Proxy(obj, {
 			get(target, prop, receiver) {
-				let result = contextGetter(proxy, target, prop, observers, parent);
-				if (undefined === result) {
+				let result = contextGetter(observable, target, prop, observers, parent);
+				if (!isDefined(result)) {
 					if (Reflect.has(target, prop)) {
 						result = Reflect.get(target, prop, receiver);
-						if (isFunction(result)) {
-							result = result.bind(proxy);
-						} else if (detectingObservables) {
-							detectingObservables.push([proxy, prop]);
+						if (isFunction(result) && !result[OBSERVABLE]) {
+							return (...args) => result.apply(target, args);
+//							return (...args) => result.apply(observable, args);
 						}
+						detectingObservables?.push([observable, prop]);
 					} else if (typeof prop !== 'symbol') {
 						if (parent) {
 //							console.log(`Undefined property '${prop}' in current observeObject, lookup parent`, {target,parent});
@@ -68,6 +68,7 @@ export function observeObject(obj, parent/*, deep*/)
 					}
 					let oldValue = Reflect.get(target, prop, receiver);
 					if (oldValue !== value) {
+						observers.dispatch(prop + ".beforeChange", oldValue);
 						result = Reflect.set(target, prop, value, receiver);
 						value = Reflect.get(target, prop, receiver);
 						if (result && oldValue !== value) {
@@ -82,7 +83,7 @@ export function observeObject(obj, parent/*, deep*/)
 				return Reflect.deleteProperty(target, prop);
 			}
 		});
-		observablesMap.set(obj, proxy);
+		observablesMap.set(obj, observable);
 	}
-	return proxy;
+	return observable;
 }
